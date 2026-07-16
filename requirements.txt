@@ -1,0 +1,6 @@
+matplotlib
+numpy
+rplidar-roboticia
+adafruit-blinka 
+adafruit-circuitpython-icm20x
+smbus2
