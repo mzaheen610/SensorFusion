@@ -1,6 +1,6 @@
-# SensorFusion
+# Multimodal Sensor Fusion
 
-SensorFusion is an embedded Raspberry Pi prototype for LiDAR, IMU, and camera based navigation research. The current working path focuses on real-time 2D LiDAR plus IMU fusion for headless SLAM map generation.
+Multimodal Sensor Fusion is an embedded Raspberry Pi prototype for LiDAR, IMU, and camera based navigation research. The current working path focuses on real-time 2D LiDAR plus IMU fusion for headless SLAM map generation.
 
 The repo is organized as an engineering handoff for the Embedded Application Lab project: runnable scripts live in `scripts/`, hardware smoke tests live in `tests/hardware/`, older prototypes are preserved in `experiments/archived/`, and project knowledge is mirrored from Notion into `docs/`.
 
@@ -49,5 +49,6 @@ The script expects the LiDAR on `/dev/ttyUSB0`, an ICM20948 IMU at I2C address `
 - `docs/architecture.md` explains the data flow and estimator/mapping stages.
 - `docs/setup-raspberry-pi.md` covers environment and hardware setup.
 - `docs/research-summary.md` mirrors the key Notion research and progress findings.
+- `docs/research-papers.md` indexes the core papers and their roles in the project.
 - `docs/experiments.md` explains the archived prototypes and canonical script choice.
 - `docs/troubleshooting.md` captures common Raspberry Pi, LiDAR, IMU, and headless plotting issues.

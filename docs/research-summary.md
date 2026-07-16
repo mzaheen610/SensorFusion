@@ -21,6 +21,19 @@ The Notion research notes identify these recurring themes:
 - LiDAR plus IMU SLAM is a practical baseline for omnidirectional mapping and wheeled robot navigation in GPS-denied environments.
 - Visual/LiDAR SLAM aided inertial navigation is relevant for longer-term navigation stability where standalone inertial dead reckoning drifts.
 
+## Key Papers
+
+The project paper set currently centers on:
+
+- `An_RPLiDAR_based_SLAM_equipped_with_IMU_for_Autonomous_Navigation_of_Wheeled_Mobile_Robot.pdf`
+- `The_Practice_of_Mapping-based_Navigation_System_for_Indoor_Robot_with_RPLIDAR_and_Raspberry_Pi.pdf`
+- `HVL-SLAM_Hybrid_Vision_and_LiDAR_Fusion_for_SLAM.pdf`
+- `LiDAR_Visual_SLAM-Aided_Vehicular_Inertial_Navigation_System_for_GNSS-Denied_Environments.pdf`
+- `Comparison_of_Visual_and_LiDAR_SLAM_Algorithms_using_NASA_Flight_Test_Data_FINAL.pdf`
+- `fast_livo.pdf`
+
+See `docs/research-papers.md` for the structured paper index.
+
 ## Raspberry Pi Implementation Status
 
 The project has reached a functional MVP stage:
