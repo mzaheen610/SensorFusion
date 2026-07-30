@@ -10,4 +10,3 @@ adafruit-blinka
 adafruit-circuitpython-icm20x
 smbus2
 picamzero
-python3-picamzero
