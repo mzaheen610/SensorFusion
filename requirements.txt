@@ -1,6 +1,16 @@
 matplotlib
+<<<<<<< HEAD
 numpy
 rplidar-roboticia
 adafruit-blinka 
 adafruit-circuitpython-icm20x
 smbus2
+=======
+numpy<1.27.0,>=1.19.5
+rplidar-roboticia
+adafruit-blinka 
+adafruit-circuitpython-icm20x
+smbus2
+picamzero
+python3-picamzero
+>>>>>>> 2bb05b45273f5ecae3d7dc1bb39161d305e666e8
