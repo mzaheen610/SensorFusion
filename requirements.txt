@@ -1,0 +1,8 @@
+matplotlib
+numpy<1.27.0,>=1.19.5
+rplidar-roboticia
+adafruit-blinka 
+adafruit-circuitpython-icm20x
+smbus2
+picamzero
+python3-picamzero
