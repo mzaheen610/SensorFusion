@@ -10,7 +10,7 @@ signal.alarm(10)
 
 try:
     cam = Camera()
-    cam.take_photo("./images/hello")
+    cam.take_photo("./images")
     cam.capture_sequence(f"./images/sequence.jpg", num_images=3, interval=2)
     signal.alarm(0)  # Cancel alarm
 except TimeoutError as e:
