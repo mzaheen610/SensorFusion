@@ -3,7 +3,7 @@ Forward propogation for sensor fusion model.
 IMU integration
 """
 #IMU used is BNO055, Lidar is RPLidar A1M8, Camera is PiCamZero
-from sensorfusion.initialize import IMU, Lidar, Camera
+from initialize import IMU, Lidar, Camera
 from dataclasses import dataclass
 from utils.so3_rotation import exp, skew
 import numpy as np
@@ -63,7 +63,7 @@ class ESIKFStateEstimator:
         x_prev = self.state
 
         A = self.compute_jacobian(x_prev, u)#compute the jacobian of the state transition model
-        
+
         # Implement the prediction step of the Kalman filter here
         ang_act = u[0] - x_prev.bg - w[n_g] #wm = wa + bg + ng -> wa = wm - bg - ng
         accel = (x_prev.R @ (u[1] - x_prev.ba - w[n_a]) + x_prev.g)
