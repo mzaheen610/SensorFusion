@@ -22,6 +22,7 @@ class ESIKFStateEstimator:
     def __init__(self):
         self.P = np.eye(3) # process covariance matrix
         self.Q = np.eye(3) # process noise covariance
+        self.R = np.eye(3) # measurement matrix
         self.time_step = 0.01  # IMU is at 100Hz, so time step is 0.01 seconds
         self.state = State(
             R = np.eye(3,3),
@@ -32,6 +33,7 @@ class ESIKFStateEstimator:
             g = np.array([0,0,-9.81]),
         )
     def compute_jacobian(self, x_prev, u):
+        #Computing Jacobian of the state model wrt the state error delta_x
         dt = self.time_step
         A = np.eye(18)
         a_I = u[1] - x_prev.ba
@@ -56,7 +58,12 @@ class ESIKFStateEstimator:
         A[6:9, 15:18] = np.eye(3) * dt
 
         return A
-    def predict(self, x_prev: State, u: list, w: list):#u = [w,a]
+    
+    def predict(self, u: list, w: list):#u = [w,a]
+        x_prev = self.state
+
+        A = self.compute_jacobian(x_prev, u)#compute the jacobian of the state transition model
+        
         # Implement the prediction step of the Kalman filter here
         ang_act = u[0] - x_prev.bg - w[n_g] #wm = wa + bg + ng -> wa = wm - bg - ng
         accel = (x_prev.R @ (u[1] - x_prev.ba - w[n_a]) + x_prev.g)
@@ -68,14 +75,13 @@ class ESIKFStateEstimator:
         self.state.v += accel * self.time_step
 
         #Covariance update
-        A = self.compute_jacobian(x_prev, u)#compute the jacobian of the state transition model
-        P = self.A @ self.P @ self.A.T + self.Q
+        self.P = self.A @ self.P @ self.A.T + self.Q
+        return self.state, self.P
 
     def update(self):
         # Implement the update/correction step of the Kalman filter here
         # After LIDAR data arrives and it is backward propogated
         error_meas = self.R #measurement noise covariance
-        error_pred = self.
-        gain = error_pred / (error_pred+ error_meas)
+        # gain = error_pred / (error_pred+ error_meas)
         pass
 
