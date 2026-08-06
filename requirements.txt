@@ -3,10 +3,10 @@ numpy
 rplidar-roboticia
 adafruit-blinka 
 adafruit-circuitpython-icm20x
+adafruit-circuitpython-bno055
 smbus2
 numpy<1.27.0,>=1.19.5
 rplidar-roboticia
 adafruit-blinka 
-adafruit-circuitpython-icm20x
 smbus2
 picamzero
