@@ -3,7 +3,6 @@ Forward propogation for sensor fusion model.
 IMU integration
 """
 #IMU used is BNO055, Lidar is RPLidar A1M8, Camera is PiCamZero
-from initialize import IMU, Lidar, Camera
 from dataclasses import dataclass
 from utils.so3_rotation import exp, skew
 import numpy as np
