@@ -1,27 +1,89 @@
 #!/usr/bin/env python3
-"""Quick test for IMU imports"""
-import sys
-import time
-print(f"Python path: {sys.path[:3]}")
 
-try:
-    import board, busio
-    from adafruit_icm20x import ICM20948
-    print("[SUCCESS] IMU libraries imported successfully!")
-    IMU_ADDR  = 0x69     
-    DT_IMU = 1       
-    #test imu data
-    try:
-        i2c = busio.I2C(board.SCL, board.SDA)
-        imu = ICM20948(i2c, address=IMU_ADDR)
-        while True:
-            a_x, a_y, a_z = imu.acceleration
-            g_x, g_y, g_z = imu.gyro
-            time.sleep(DT_IMU)
-            print("Acceleration:", a_x, a_y, a_z)
-            print("Gyro:", g_x,g_y,g_z)
-    except Exception as err:
-        print(f"Failed {err}")
-except ImportError as e:
-    print(f"[FAILED] {e}")
-    sys.exit(1)
+import time
+import board
+import busio
+import adafruit_bno055
+
+def main():
+    print("Initializing BNO055...")
+
+    # Initialize I2C
+    i2c = busio.I2C(board.SCL, board.SDA)
+
+    # Initialize sensor
+    sensor = adafruit_bno055.BNO055_I2C(i2c)
+
+    # Give the sensor some time to start
+    time.sleep(1)
+
+    print("BNO055 initialized successfully.\n")
+
+    while True:
+        print("=" * 60)
+
+        # Calibration status
+        try:
+            sys_cal, gyro_cal, accel_cal, mag_cal = sensor.calibration_status
+            print(f"Calibration:")
+            print(f"  System : {sys_cal}/3")
+            print(f"  Gyro   : {gyro_cal}/3")
+            print(f"  Accel  : {accel_cal}/3")
+            print(f"  Mag    : {mag_cal}/3")
+        except Exception as e:
+            print("Calibration:", e)
+
+        # Gyroscope (rad/s)
+        try:
+            print(f"Gyroscope (rad/s):          {sensor.gyro}")
+        except Exception as e:
+            print("Gyroscope:", e)
+
+        # Raw acceleration (includes gravity)
+        try:
+            print(f"Acceleration (m/s²):        {sensor.acceleration}")
+        except Exception as e:
+            print("Acceleration:", e)
+
+        # Linear acceleration (gravity removed)
+        try:
+            print(f"Linear Accel (m/s²):        {sensor.linear_acceleration}")
+        except Exception as e:
+            print("Linear Acceleration:", e)
+
+        # Gravity vector
+        try:
+            print(f"Gravity (m/s²):             {sensor.gravity}")
+        except Exception as e:
+            print("Gravity:", e)
+
+        # Magnetometer
+        try:
+            print(f"Magnetometer (uT):          {sensor.magnetic}")
+        except Exception as e:
+            print("Magnetometer:", e)
+
+        # Euler angles
+        try:
+            print(f"Euler Angles (deg):         {sensor.euler}")
+        except Exception as e:
+            print("Euler:", e)
+
+        # Quaternion
+        try:
+            print(f"Quaternion:                {sensor.quaternion}")
+        except Exception as e:
+            print("Quaternion:", e)
+
+        # Temperature
+        try:
+            print(f"Temperature (°C):           {sensor.temperature}")
+        except Exception as e:
+            print("Temperature:", e)
+
+        print()
+        time.sleep(0.5)
+
+
+if __name__ == "__main__":
+    main()
