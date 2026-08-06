@@ -20,8 +20,8 @@ class State:
 
 class ESIKFStateEstimator:
     def __init__(self):
-        self.P = np.eye(3) # process covariance matrix
-        self.Q = np.eye(3) # process noise covariance
+        self.P = np.eye(18) # process covariance matrix
+        self.Q = np.eye(18) # process noise covariance
         self.R = np.eye(3) # measurement matrix
         self.time_step = 0.01  # IMU is at 100Hz, so time step is 0.01 seconds
         self.state = State(
@@ -59,23 +59,23 @@ class ESIKFStateEstimator:
 
         return A
     
-    def predict(self, u: list, w: list):#u = [w,a]
+    def predict(self, u: list):#u = [w,a]
         x_prev = self.state
 
         A = self.compute_jacobian(x_prev, u)#compute the jacobian of the state transition model
 
         # Implement the prediction step of the Kalman filter here
-        ang_act = u[0] - x_prev.bg - w[n_g] #wm = wa + bg + ng -> wa = wm - bg - ng
-        accel = (x_prev.R @ (u[1] - x_prev.ba - w[n_a]) + x_prev.g)
+        ang_act = u[0] - x_prev.bg #wm = wa + bg + ng -> wa = wm - bg - ng
+        accel = (x_prev.R @ (u[1] - x_prev.ba) + x_prev.g)
 
-        delta_theta = ang_act @ self.time_step
+        delta_theta = ang_act * self.time_step
         delta_R = exp(delta_theta)
         self.state.R = self.state.R @ delta_R  #del_theta = w*del_t --> converted to proper SO(3) before adding to the rotation matrix(SO(3))
         self.state.p += (self.state.v * self.time_step) + (0.5 * accel * self.time_step *self.time_step) 
         self.state.v += accel * self.time_step
 
         #Covariance update
-        self.P = self.A @ self.P @ self.A.T + self.Q
+        self.P = A @ self.P @ A.T + self.Q
         return self.state, self.P
 
     def update(self):
