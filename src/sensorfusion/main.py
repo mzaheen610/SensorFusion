@@ -9,6 +9,16 @@ if __name__ == "__main__":
     filter.state.R, filter.state.bg = imu.initialize_rotation_gyro()
     initial_covariance = 100 * np.eye(18)
 
+    print("Initial R:")
+    print(filter.state.R)
+    
+    u = imu.get_readings()
+    a_body = np.array(u[1])
+    a_world = filter.state.R @ a_body
+
+    print("Body accel :", a_body)
+    print("World accel:", a_world)
+
     while(True):
         imu_data = imu.get_readings()
         print("gyro: ", imu_data[0])
