@@ -11,10 +11,58 @@ from picamzero import Camera as PiCamera
 import numpy as np
 from utils.so3_rotation import exp
 
+
+def _is_valid_reading(reading):
+    if reading is None:
+        return False
+    try:
+        values = np.asarray(reading, dtype=float)
+    except (TypeError, ValueError):
+        return False
+    return np.all(np.isfinite(values))
+
+
+def _get_calibration_status(sensor):
+    status = getattr(sensor, "calibration_status", None)
+    if callable(status):
+        status = status()
+
+    if status is None:
+        calibrated = getattr(sensor, "calibrated", None)
+        if calibrated is True:
+            return (3, 3, 3, 3)
+        return None
+
+    try:
+        values = tuple(int(value) for value in status)
+    except TypeError:
+        return None
+
+    if len(values) == 4:
+        return values
+
+    return None
+
 class IMU:
     def __init__(self):
         i2c = busio.I2C(board.SCL, board.SDA)
         self.sensor = adafruit_bno055.BNO055_I2C(i2c)
+
+    def wait_for_calibration(self):
+        last_status = None
+        print("Waiting for BNO055 calibration...")
+
+        while True:
+            status = _get_calibration_status(self.sensor)
+            if status == (3, 3, 3, 3):
+                print("BNO055 calibration complete.")
+                return status
+
+            if status != last_status:
+                print("Calibration status:", status)
+                last_status = status
+
+            time.sleep(0.1)
 
     def get_readings(self):
         gyro = self.sensor.gyro
@@ -26,6 +74,7 @@ class IMU:
     def initialize_rotation_gyro(self):
         #Find the initial rotation matrix from the IMU readings
         #Collect 5s of IMU data to get the mean acceleration
+        self.wait_for_calibration()
         curr_time = time.time()
         accel_data = []
         gyro_data = []
@@ -33,9 +82,9 @@ class IMU:
         while(time.time() - curr_time < 5):
             accel = self.sensor.acceleration
             gyro = self.sensor.gyro
-            if gyro is not None:
+            if _is_valid_reading(gyro):
                 gyro_data.append(gyro)
-            if accel is not None:
+            if _is_valid_reading(accel):
                 accel_data.append(accel)
             time.sleep(0.01) #sample at 100Hz or else it may read same value multiple times
 
