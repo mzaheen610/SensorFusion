@@ -5,9 +5,9 @@ import time
 
 if __name__ == "__main__":
     filter = ESIKFStateEstimator()
-    initial_state = np.zeros(18)
-    initial_covariance = 100 * np.eye(18)
     imu = IMU()
+    filter.state.R, filter.state.bg = imu.initialize_rotation_gyro()
+    initial_covariance = 100 * np.eye(18)
 
     while(True):
         imu_data = imu.get_readings()
