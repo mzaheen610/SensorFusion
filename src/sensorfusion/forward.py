@@ -65,7 +65,7 @@ class ESIKFStateEstimator:
 
         # Implement the prediction step of the Kalman filter here
         ang_act = u[0] - x_prev.bg #wm = wa + bg + ng -> wa = wm - bg - ng
-        accel = (x_prev.R @ (u[1] - x_prev.ba) + x_prev.g)
+        accel = (x_prev.R @ (u[1] - x_prev.ba) - x_prev.g)
 
         delta_theta = ang_act * self.time_step
         delta_R = exp(delta_theta)
