@@ -6,12 +6,13 @@ import time
 if __name__ == "__main__":
     filter = ESIKFStateEstimator()
     imu = IMU()
+    time.sleep(1.0)   # Let BNO055 finish initializing
     filter.state.R, filter.state.bg = imu.initialize_rotation_gyro()
     initial_covariance = 100 * np.eye(18)
 
     print("Initial R:")
     print(filter.state.R)
-    
+
     u = imu.get_readings()
     a_body = np.array(u[1])
     a_world = filter.state.R @ a_body

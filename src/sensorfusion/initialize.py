@@ -19,7 +19,9 @@ class IMU:
     def get_readings(self):
         gyro = self.sensor.gyro
         accel = self.sensor.acceleration
-        return gyro, accel
+        if gyro is not None and accel is not None:
+            return np.array(gyro), np.array(accel)
+        time.sleep(0.001)
     
     def initialize_rotation_gyro(self):
         #Find the initial rotation matrix from the IMU readings
