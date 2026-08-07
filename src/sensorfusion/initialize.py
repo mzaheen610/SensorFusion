@@ -30,10 +30,15 @@ class IMU:
         
         while(time.time() - curr_time < 5):
             accel = self.sensor.acceleration
-            gyro_data.append(self.sensor.gyro)
+            gyro = self.sensor.gyro
+            if gyro is not None:
+                gyro_data.append(gyro)
             if accel is not None:
                 accel_data.append(accel)
             time.sleep(0.01) #sample at 100Hz or else it may read same value multiple times
+
+        if not gyro_data or not accel_data:
+            return np.eye(3), np.zeros(3)
 
         #Estimate gyro bias
         bg = np.mean(gyro_data, axis=0)
@@ -49,7 +54,7 @@ class IMU:
         #Normalize the axis to get only the direction
         axis_norm = np.linalg.norm(axis)
         if axis_norm < 1e-8:
-            return np.eye(3)
+            return np.eye(3), bg
         axis = axis / axis_norm
         delta_theta = axis * angle
         #Finding the initial rotation after SO(3) transform
