@@ -20,10 +20,17 @@ if __name__ == "__main__":
     print("Body accel :", a_body)
     print("World accel:", a_world)
 
+    prev = time.time()
+
     while(True):
+        now = time.time()
+        dt = now - prev
+        prev = now
+        print(dt)
+        
         imu_data = imu.get_readings()
         print("gyro: ", imu_data[0])
         print("accel: ", imu_data[1])
         state, cov = filter.predict(imu_data)
-        time.sleep(1)
+        time.sleep(0.01)
         print(state.p)
