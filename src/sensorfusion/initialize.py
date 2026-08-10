@@ -54,7 +54,7 @@ class IMU:
 
         while True:
             status = _get_calibration_status(self.sensor)
-            if status == (3, 3, 3, 3):
+            if status >= (3, 3, 3, 3):
                 print("BNO055 calibration complete.")
                 return status
 
@@ -110,7 +110,15 @@ class IMU:
         delta_theta = axis * angle
         #Finding the initial rotation after SO(3) transform
         R_theta = exp(delta_theta)
-        return R_theta, bg
+
+        g_world_actual = np.array([0.0, 0.0, -9.81])
+        
+        # Calculate what gravity should look like in the body frame
+        expected_g_body = R_theta.T @ g_world_actual
+        
+        # Bias is the difference between the actual reading and the expected gravity
+        ba = a_mean - expected_g_body
+        return R_theta, bg, ba
     
 class Lidar:
     def __init__(self, port='/dev/ttyUSB0'):

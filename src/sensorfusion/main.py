@@ -7,7 +7,7 @@ if __name__ == "__main__":
     filter = ESIKFStateEstimator()
     imu = IMU()
     time.sleep(1.0)   # Let BNO055 finish initializing
-    filter.state.R, filter.state.bg = imu.initialize_rotation_gyro()
+    filter.state.R, filter.state.bg, filter.state.ba = imu.initialize_rotation_gyro()
     initial_covariance = 100 * np.eye(18)
 
     print("Initial R:")
@@ -27,10 +27,13 @@ if __name__ == "__main__":
         dt = now - prev
         prev = now
         print(dt)
-        
+
         imu_data = imu.get_readings()
         print("gyro: ", imu_data[0])
         print("accel: ", imu_data[1])
         state, cov = filter.predict(imu_data)
         time.sleep(0.01)
         print(state.p)
+
+    #After forward propogation the LiDAR scan is backpropogated
+    
