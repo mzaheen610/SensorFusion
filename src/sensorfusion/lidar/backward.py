@@ -24,7 +24,7 @@ def compute_prev_pose(current_state, delta_time, gyro, accel):
 
     #Covariance update
     # self.P = A @ self.P @ A.T + self.Q
-    return x_prev, None
+    return x_prev
 
 def backprop(scan_end_time, prev_scan_time, imu_pose, scan, imu_measurement_buffer):
     """
