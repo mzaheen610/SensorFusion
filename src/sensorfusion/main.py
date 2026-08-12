@@ -25,6 +25,7 @@ if __name__ == "__main__":
     prev = time.time()
     imu_state_buffer = []
     imu_measurement_buffer = []
+    lidar_prev_scan_time = 0.0
 
     while(True):
         now = time.time()
@@ -42,11 +43,15 @@ if __name__ == "__main__":
         imu_state = (now, state) #store the timestamp and state for backpropogation of LiDAR points
         imu_state_buffer.append(imu_state)
 
-        #After forward propogation the LiDAR scan is backpropogated
-        if lidar.get_readings() is not None:
-            scan = lidar.get_readings()
-
-        lidar_points_compensated = backprop(now, prev, state, scan, imu_measurement_buffer)
+        #After forward propogation the LiDAR points are backpropogated when the scan arrives
+        scan = lidar.get_readings()
+        if scan is not None:
+            now = time.time()
+            lidar_points_compensated = backprop(now, lidar_prev_scan_time, state, scan, imu_measurement_buffer)
+            lidar_prev_scan_time = now
+            print("Original LiDAR points: ", scan)
+            print("Compensated LiDAR points: ", lidar_points_compensated)
+            
         time.sleep(0.01)
         print(state.p)
 
