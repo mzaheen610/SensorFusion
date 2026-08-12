@@ -125,6 +125,8 @@ class Lidar:
         self.lidar = RPLidar(port)
 
     def get_readings(self):
+        self.lidar.start_motor()
+        time.sleep(2)  # Allow the motor to spin up
         return list(self.lidar.iter_scans())
 
 class CameraSensor:

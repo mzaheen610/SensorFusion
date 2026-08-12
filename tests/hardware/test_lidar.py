@@ -24,6 +24,7 @@ try:
     
     print("[TEST] Reading scans...")
     scan_count = 0
+
     for scan in lidar.iter_scans(max_buf_meas=5000):
         scan_count += 1
         for m in scan:
@@ -33,7 +34,7 @@ try:
         angles = np.array([m[1] for m in scan])
         ranges = np.array([m[2] / 1000.0 for m in scan])
         print(f"[SCAN {scan_count}] Points: {len(scan)}, Angle range: {angles.min():.1f}-{angles.max():.1f}°, Range: {ranges.min():.2f}-{ranges.max():.2f}m")
-        
+
         if scan_count >= 5:
             break
     
