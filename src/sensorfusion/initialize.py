@@ -74,7 +74,7 @@ class IMU:
     def initialize_rotation_gyro(self):
         #Find the initial rotation matrix from the IMU readings
         #Collect 5s of IMU data to get the mean acceleration
-        self.wait_for_calibration()
+        # self.wait_for_calibration()
         curr_time = time.time()
         accel_data = []
         gyro_data = []
@@ -123,10 +123,10 @@ class IMU:
 class Lidar:
     def __init__(self, port='/dev/ttyUSB0'):
         self.lidar = RPLidar(port)
-
-    def get_readings(self):
         self.lidar.start_motor()
         time.sleep(2)  # Allow the motor to spin up
+
+    def get_readings(self):
         return list(self.lidar.iter_scans())
 
 class CameraSensor:
