@@ -34,7 +34,7 @@ if __name__ == "__main__":
         print(dt)
 
         imu_data = imu.get_readings()
-        imu_measurement_buffer.append((now, imu_data)) #store the timestamp and imu readings for backpropogation of LiDAR points
+        imu_measurement_buffer.append((now, imu_data[0], imu_data[1])) #store the timestamp and imu readings for backpropogation of LiDAR points
         print("gyro: ", imu_data[0])
         print("accel: ", imu_data[1])
         #After getting the IMU readings, we perform the forward propagation of the state using the ESIKF filter

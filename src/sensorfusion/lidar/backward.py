@@ -45,10 +45,10 @@ def backprop(scan_end_time, prev_scan_time, imu_pose, scan, imu_measurement_buff
             #for points captured after the last IMU measurement, we use the last IMU measurement to backpropogate the state
             if imu_time <= point_time:
                 dt = current_time - imu_time
-                pose_j = compute_prev_pose(pose_j, dt, (gyro, accel))
+                pose_j = compute_prev_pose(pose_j, dt, gyro, accel)
                 break
             dt = current_time - imu_time
-            pose_j = compute_prev_pose(pose_j, dt, (gyro, accel))
+            pose_j = compute_prev_pose(pose_j, dt, gyro, accel)
             current_time = imu_time
         #Transform the point to the scan end time frame using the pose_j
         angle = np.deg2rad(point[1])
