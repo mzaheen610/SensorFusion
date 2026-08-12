@@ -89,7 +89,7 @@ class IMU:
             time.sleep(0.01) #sample at 100Hz or else it may read same value multiple times
 
         if not gyro_data or not accel_data:
-            return np.eye(3), np.zeros(3)
+            return np.eye(3), np.zeros(3), np.zeros(3)
 
         #Estimate gyro bias
         bg = np.mean(gyro_data, axis=0)
@@ -105,7 +105,7 @@ class IMU:
         #Normalize the axis to get only the direction
         axis_norm = np.linalg.norm(axis)
         if axis_norm < 1e-8:
-            return np.eye(3), bg
+            return np.eye(3), bg, np.zeros(3)
         axis = axis / axis_norm
         delta_theta = axis * angle
         #Finding the initial rotation after SO(3) transform
@@ -122,12 +122,21 @@ class IMU:
     
 class Lidar:
     def __init__(self, port='/dev/ttyUSB0'):
-        self.lidar = RPLidar(port)
+        self.lidar = RPLidar(port, baudrate=256000, timeout=3)
+        self.lidar.get_health = lambda: ('Good', 0)
+        self.lidar.connect()
         self.lidar.start_motor()
+        self.lidar.clean_input()
         time.sleep(2)  # Allow the motor to spin up
+        self._scans = self.lidar.iter_scans()
 
     def get_readings(self):
-        return list(self.lidar.iter_scans())
+        try:
+            scan = next(self._scans)
+            return scan
+        except Exception as e:
+            print(f"Error occurred while fetching LiDAR readings: {e}")
+            return None
 
 class CameraSensor:
     def __init__(self):
