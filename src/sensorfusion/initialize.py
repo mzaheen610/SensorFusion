@@ -122,13 +122,28 @@ class IMU:
     
 class Lidar:
     def __init__(self, port='/dev/ttyUSB0'):
-        self.lidar = RPLidar(port, baudrate=256000, timeout=3)
+        self.port = port
+        self._open_lidar()
+
+    def _open_lidar(self):
+        self.lidar = RPLidar(self.port, baudrate=256000, timeout=3)
         self.lidar.get_health = lambda: ('Good', 0)
         self.lidar.connect()
         self.lidar.start_motor()
         self.lidar.clean_input()
         time.sleep(2)  # Allow the motor to spin up
-        self._scans = self.lidar.iter_scans()
+        self._scans = self.lidar.iter_scans(max_buf_meas=3000)
+
+    def _reopen_lidar(self):
+        try:
+            self.lidar.stop()
+            self.lidar.stop_motor()
+            self.lidar.disconnect()
+        except Exception:
+            pass
+
+        time.sleep(1)
+        self._open_lidar()
 
     def get_readings(self):
         try:
@@ -136,6 +151,7 @@ class Lidar:
             return scan
         except Exception as e:
             print(f"Error occurred while fetching LiDAR readings: {e}")
+            self._reopen_lidar()
             return None
 
 class CameraSensor:
