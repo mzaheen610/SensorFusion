@@ -34,7 +34,11 @@ def backprop(scan_end_time, prev_scan_time, imu_pose, scan, imu_measurement_buff
     angular_rate_lidar = 2 * pi * 10 # 10Hz LiDAR scan frequency
     for point in scan:
         #Find the delta time between scan end and the point sampled time
-        point_time = point[1] / angular_rate_lidar
+        # point_time = point[1] / angular_rate_lidar
+        scan_period = scan_end_time - prev_scan_time
+        point_time = (point[1] / 360.0) * scan_period
+        point_abs_time = prev_scan_time + point_time
+
         delta_time = scan_end_time - (prev_scan_time + point_time)
         pose_j = deepcopy(imu_pose)
         current_time = scan_end_time
@@ -43,7 +47,7 @@ def backprop(scan_end_time, prev_scan_time, imu_pose, scan, imu_measurement_buff
             if imu_time >= current_time:
                 continue
             #for points captured after the last IMU measurement, we use the last IMU measurement to backpropogate the state
-            if imu_time <= point_time:
+            if imu_time <= point_abs_time:
                 dt = current_time - imu_time
                 pose_j = compute_prev_pose(pose_j, dt, gyro, accel)
                 break
