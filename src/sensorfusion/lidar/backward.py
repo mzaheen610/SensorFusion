@@ -42,6 +42,9 @@ def backprop(scan_end_time, prev_scan_time, imu_pose, scan, imu_measurement_buff
         delta_time = scan_end_time - (prev_scan_time + point_time)
         pose_j = deepcopy(imu_pose)
         current_time = scan_end_time
+        print("Scan end time: ", scan_end_time)
+        print("Prev scan time: ", prev_scan_time)
+        print("Point time: ", point_time)
         #Backpropogate the state using IMU measurements till the point time is reached
         for imu_time, gyro, accel in reversed(imu_measurement_buffer):
             if imu_time >= current_time:
@@ -61,6 +64,10 @@ def backprop(scan_end_time, prev_scan_time, imu_pose, scan, imu_measurement_buff
         R_kj = imu_pose.R.T @ pose_j.R
         p_kj = imu_pose.R.T @ (pose_j.p - imu_pose.p)
 
+        print("Pose at scan end time: ", imu_pose.p)
+        print("Pose at point time: ", pose_j.p)
+        print("R_kj: ", R_kj)
+        print("p_kj: ", p_kj)
         projected_point = R_kj @ point_body + p_kj
         compensated_points.append(projected_point)
     return compensated_points

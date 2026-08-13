@@ -49,7 +49,10 @@ if __name__ == "__main__":
             now = time.time()
             lidar_points_compensated = backprop(now, lidar_prev_scan_time, state, scan, imu_measurement_buffer)
             lidar_prev_scan_time = now
-            print("Original LiDAR points: ", scan)
+            for i in range(5):
+                print("Original LiDAR points: ", scan[i])
+            for i in range(5):
+                print("Compensated LiDAR points: ", lidar_points_compensated[i])
             print("Current position: ", state.p)
             print("Compensated LiDAR points: ", lidar_points_compensated)
             
