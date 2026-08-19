@@ -1,16 +1,9 @@
 from picamzero import Camera
-# import signal
 
-# def timeout_handler(signum, frame):
-#     raise TimeoutError("Camera operation timed out")
-
-# # Set a 10-second timeout
-# signal.signal(signal.SIGALRM, timeout_handler)
-# signal.alarm(10)
+cam = Camera()
 
 for i in range(5):
     try:
-        cam = Camera()
         frame = cam.capture_array()
         print("Camera data:", frame)
         # cam.take_photo("./images")
