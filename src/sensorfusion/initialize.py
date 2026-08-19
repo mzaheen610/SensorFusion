@@ -161,4 +161,9 @@ class CameraSensor:
     def take_photo(self, path):
         self.camera.take_photo(path)
 
+    def get_frame(self):
+        frame = self.camera.capture_array()
+        return frame
+
+
 
