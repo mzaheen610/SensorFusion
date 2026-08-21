@@ -30,7 +30,12 @@ class Map:
     def __init__(self):
         self.voxel_map = {}
         self.voxel_size = 0.5
-
+        
+    def is_empty(self):
+        if not self.voxel_map:
+            return True
+        return False
+    
     def add_points(self, points):
         #add lidar points to the voxel map
         for point in points:
