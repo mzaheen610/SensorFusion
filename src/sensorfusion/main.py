@@ -83,7 +83,7 @@ if __name__ == "__main__":
 
         #Compute the residuals between each point and the nearest plane in the world map
         total_res = 0
-        state_updated = np.array()
+        # state_updated = np.array()
         eps = 0.01
 
         #Iterated Kalman Update
