@@ -45,6 +45,7 @@ class Map:
                     "lidar": [],
                     "image": []
                 }
+                self.voxel_map[key]["lidar"].append(point)
             else:
                 self.voxel_map[key]["lidar"].append(point)
     
@@ -52,7 +53,7 @@ class Map:
         #find the nearest neighbors of the given lidar point from the global map
         #assuming planar neighbors will be found in the same voxel
         key = self.get_voxel_key(point)
-        neighbors = self.voxel_map[key]["lidar"]
+        neighbors = self.voxel_map.get(key, None)
         return neighbors
     
     def get_voxel_key(self, point):

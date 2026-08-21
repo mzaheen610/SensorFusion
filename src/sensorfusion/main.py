@@ -120,6 +120,8 @@ if __name__ == "__main__":
                     #find the k nearest points from the global map and fit a plane
                     # 4. Fit a plane using SVD
                     neighbors = map.query(point)
+                    if neighbors is None:
+                        
                     center = np.mean(neighbors, axis=0) 
                     centered_neighbors = neighbors - center
                     #find the normal to the plane based on the SVD
