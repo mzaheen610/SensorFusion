@@ -64,7 +64,6 @@ if __name__ == "__main__":
             for i in range(5):
                 print("Compensated LiDAR points: ", lidar_points_compensated[i])
             print("Current position: ", state.p)
-            print("Compensated LiDAR points: ", lidar_points_compensated)
 
         """
         LiDAR based update.

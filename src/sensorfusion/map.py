@@ -30,7 +30,7 @@ class Map:
     def __init__(self):
         self.voxel_map = {}
         self.voxel_size = 0.5
-        
+
     def is_empty(self):
         if not self.voxel_map:
             return True
