@@ -164,6 +164,6 @@ class CameraSensor:
     def get_frame(self):
         frame = self.camera.capture_array()
         return frame
-
+    
 
 

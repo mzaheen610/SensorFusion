@@ -5,7 +5,7 @@ import time
 from lidar.backward import backprop
 from map import Map
 from utils.so3_rotation import skew, exp
-
+from utils.projections import project_points_to_frame
 if __name__ == "__main__":
     filter = ESIKFStateEstimator()
     imu = IMU()
@@ -65,7 +65,8 @@ if __name__ == "__main__":
         """
         #first transform the LiDAR points to the world frame using the current state
         lidar_imu_extrinsic = np.eye(4) #assuming the LiDAR and IMU are co-located
-        global_imu_extrinsic = np.eye(4) #assuming the IMU is at the origin of the world frame
+        global_imu_extrinsic = np.eye(4) #assuming the IMU is at the origin of the world frame (to transform imu to global)
+        camera_imu_extrinsic = np.eye(4)
         T_GI = np.eye(4) #homogeneous transformation matrix built from current ESIKF state at the scan end time t_k.
 
         points_world = []
@@ -94,7 +95,7 @@ if __name__ == "__main__":
 
                 #find the k nearest points from the global map and fit a plane
                 # 4. Fit a plane using SVD
-                neighbors = map.query(point, 10)
+                neighbors = map.query(point)
                 center = np.mean(neighbors, axis=0) 
                 centered_neighbors = neighbors - center
                 #find the normal to the plane based on the SVD
@@ -141,12 +142,30 @@ if __name__ == "__main__":
             I = np.eye(cov.shape[0])
             cov = (I - kalman_gain @ H) @ cov #covariance update
 
+        #add the lidar points to the map after the lidar based update is done
+        map.add_points(points_world)
+
+        #Get the camera scan at 10Hz
         frame = cam.get_frame()
+        
+        #find visual map points for the current frame based on current pose and current lidar scan
+        visual_map_points = map.query_visible_voxels(scan) #visible voxel query
+
+        #project lidar points to the current camera frame (u,v)
+        R_CI = np.eye(3) 
+        t_CI = np.eye(3)
+
+        T_CI = np.eye(4) #dummy camera imu extrinsics, real values have to be calibrated later
+        T_CI[:3, :3] = R_CI
+        T_CI[:3, :3] = t_CI
+
+        projected_points = project_points_to_frame(visual_map_points, T_GI, T_CI)
+        #get the 8x8 pixel patch surrounding the current lidar point
+        #attach the patch to the lidar map point
+
         print(frame)
         
         time.sleep(0.01)
         print(state.p)
 
-def visual_update(frame, state):
-    #compute the visual update based on the camera scan
-    pass
+
