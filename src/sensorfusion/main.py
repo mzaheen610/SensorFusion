@@ -85,10 +85,15 @@ if __name__ == "__main__":
         total_res = 0
         # state_updated = np.array()
         eps = 0.01
+        MIN_INITIAL_POINTS = 30
 
         #Iterated Kalman Update
         if scan is not None:
             #Skip update for the initial scan
+            if map.num_points() < MIN_INITIAL_POINTS:
+                map.add_points(lidar_points_compensated)
+                continue
+            
             if map.is_empty():
                 points_world = []
                 T_GI[:3, :3] = state.R
@@ -147,7 +152,7 @@ if __name__ == "__main__":
                 if len(H_list) == 0:
                     print("No valid LiDAR points for EKF update")
                     continue
-                
+
                 H = np.vstack(H_list)
                 r = np.array(residuals)
 
@@ -173,7 +178,7 @@ if __name__ == "__main__":
                 state.bg += dx[9:12]
                 state.ba += dx[12:15]
                 state.g  += dx[15:18]
-                I = np.eye(cov.shape[0])
+            I = np.eye(cov.shape[0])
             cov = (I - kalman_gain @ H) @ cov #covariance update
 
             #add the lidar points to the map after the lidar based update is done

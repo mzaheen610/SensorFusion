@@ -31,6 +31,12 @@ class Map:
         self.voxel_map = {}
         self.voxel_size = 0.5
 
+    def num_points(self):
+        count = 0
+        for key in self.voxel_map.keys:
+            count += len(self.voxel_map[key]["lidar"])
+        return count
+    
     def is_empty(self):
         if not self.voxel_map:
             return True
