@@ -33,7 +33,7 @@ class Map:
 
     def num_points(self):
         count = 0
-        for key in self.voxel_map.keys:
+        for key in self.voxel_map.keys():
             count += len(self.voxel_map[key]["lidar"])
         return count
     
@@ -59,8 +59,10 @@ class Map:
         #find the nearest neighbors of the given lidar point from the global map
         #assuming planar neighbors will be found in the same voxel
         key = self.get_voxel_key(point)
-        neighbors = self.voxel_map.get(key, None)
-        return neighbors
+        voxel = self.voxel_map.get(key, None)
+        if voxel is None:
+            return None
+        return np.array(voxel["lidar"])
     
     def get_voxel_key(self, point):
         #get the root voxel key since the voxel is 0.5x0.5x0.5 cube and multiple points could belong to the same voxel
@@ -70,7 +72,7 @@ class Map:
         #find the voxels in the map nearest to the measured points
         visual_map_points = []
         for point in points:
-            voxel_points = self.voxel_map.query(point)
+            voxel_points = self.query(point)
             visual_map_points.append(voxel_points)
         return visual_map_points
     
