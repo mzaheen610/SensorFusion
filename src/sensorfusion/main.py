@@ -25,11 +25,12 @@ if __name__ == "__main__":
 
     print("Body accel :", a_body)
     print("World accel:", a_world)
-
+    print("Bias corrected acceleration:", (a_world - filter.state.ba))
+    
     prev = time.time()
     imu_state_buffer = []
     imu_measurement_buffer = []
-    lidar_prev_scan_time = 0.0
+    lidar_prev_scan_time = time.time()
 
     while(True):
         now = time.time()
@@ -93,7 +94,7 @@ if __name__ == "__main__":
             if map.num_points() < MIN_INITIAL_POINTS:
                 map.add_points(lidar_points_compensated)
                 continue
-            
+
             if map.is_empty():
                 points_world = []
                 T_GI[:3, :3] = state.R
@@ -203,9 +204,9 @@ if __name__ == "__main__":
         # #get the 8x8 pixel patch surrounding the current lidar point
         # #attach the patch to the lidar map point
 
-        print(frame)
+        # print(frame)
         
         time.sleep(0.01)
-        print(state.p)
+        print("Current state (x,y,z): ", state.p)
 
 
