@@ -13,7 +13,7 @@ def compute_prev_pose(current_state, delta_time, gyro, accel):
     # A = self.compute_jacobian(x_prev, u)#compute the jacobian of the state transition model
 
     # Implement the prediction step of the Kalman filter here
-    ang_act = x_prev.bg - gyro  #wm = wa + bg + ng -> wa = wm - bg - ng
+    ang_act = gyro - x_prev.bg  #wm = wa + bg + ng -> wa = wm - bg - ng
     accel = (x_prev.R @ (accel - x_prev.ba) + x_prev.g)
 
     delta_theta = ang_act * delta_time

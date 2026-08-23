@@ -144,6 +144,10 @@ if __name__ == "__main__":
                     ])      
                     H_list.append(H_k)
 
+                if len(H_list) == 0:
+                    print("No valid LiDAR points for EKF update")
+                    continue
+                
                 H = np.vstack(H_list)
                 r = np.array(residuals)
 
