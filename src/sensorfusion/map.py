@@ -55,14 +55,35 @@ class Map:
             else:
                 self.voxel_map[key]["lidar"].append(point)
     
-    def query(self, point):
-        #find the nearest neighbors of the given lidar point from the global map
-        #assuming planar neighbors will be found in the same voxel
+    def query(self, point, min_points_in_voxel=10, radius_voxels=1):
+        # Find neighbors from the current voxel first.
+        # Expand to adjacent voxels only when the current voxel is sparse.
         key = self.get_voxel_key(point)
         voxel = self.voxel_map.get(key, None)
+
         if voxel is None:
+            current_points = []
+        else:
+            current_points = voxel["lidar"]
+
+        if len(current_points) >= min_points_in_voxel:
+            return np.array(current_points)
+
+        neighbors = list(current_points)
+        for dx in range(-radius_voxels, radius_voxels + 1):
+            for dy in range(-radius_voxels, radius_voxels + 1):
+                for dz in range(-radius_voxels, radius_voxels + 1):
+                    if dx == 0 and dy == 0 and dz == 0:
+                        continue
+                    nkey = (key[0] + dx, key[1] + dy, key[2] + dz)
+                    nvoxel = self.voxel_map.get(nkey, None)
+                    if nvoxel is not None and nvoxel["lidar"]:
+                        neighbors.extend(nvoxel["lidar"])
+
+        if len(neighbors) == 0:
             return None
-        return np.array(voxel["lidar"])
+
+        return np.array(neighbors)
     
     def get_voxel_key(self, point):
         #get the root voxel key since the voxel is 0.5x0.5x0.5 cube and multiple points could belong to the same voxel

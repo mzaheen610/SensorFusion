@@ -132,7 +132,7 @@ class Lidar:
         self.lidar.start_motor()
         self.lidar.clean_input()
         time.sleep(2)  # Allow the motor to spin up
-        self._scans = self.lidar.iter_scans(max_buf_meas=3000)
+        self._scans = self.lidar.iter_scans(max_buf_meas=12000)
 
     def _reopen_lidar(self):
         try:

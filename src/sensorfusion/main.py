@@ -5,7 +5,7 @@ import time
 from lidar.backward import backprop
 from map import Map
 from utils.so3_rotation import skew, exp
-from utils.projections import project_points_to_frame
+from utils.projections import project_points_to_frame, project_points_world
 if __name__ == "__main__":
     filter = ESIKFStateEstimator()
     imu = IMU()
@@ -26,7 +26,7 @@ if __name__ == "__main__":
     print("Body accel :", a_body)
     print("World accel:", a_world)
     print("Bias corrected acceleration:", (a_world - filter.state.ba))
-    
+
     prev = time.time()
     imu_state_buffer = []
     imu_measurement_buffer = []
@@ -36,7 +36,7 @@ if __name__ == "__main__":
         now = time.time()
         dt = now - prev
         prev = now
-        print(dt)
+        print("IMU prdiction frequency:", (1/dt))
 
         """
         Forward propogation
@@ -46,7 +46,7 @@ if __name__ == "__main__":
         print("gyro: ", imu_data[0])
         print("accel: ", imu_data[1])
         #After getting the IMU readings, we perform the forward propagation of the state using the ESIKF filter
-        state, cov = filter.predict(imu_data)
+        state, cov = filter.predict(imu_data, dt)
 
         imu_state = (now, state) #store the timestamp and state for backpropogation of LiDAR points
         imu_state_buffer.append(imu_state)
@@ -92,7 +92,11 @@ if __name__ == "__main__":
         if scan is not None:
             #Skip update for the initial scan
             if map.num_points() < MIN_INITIAL_POINTS:
-                map.add_points(lidar_points_compensated)
+                #add lidar points directly to the map for initial scans
+                points_world = project_points_world(lidar_points_compensated,
+                                                    state, lidar_imu_extrinsic)
+                map.add_points(points_world)
+                print("Not enough points in the map")
                 continue
 
             if map.is_empty():
@@ -152,7 +156,7 @@ if __name__ == "__main__":
 
                 if len(H_list) == 0:
                     print("No valid LiDAR points for EKF update")
-                    continue
+                    break
 
                 H = np.vstack(H_list)
                 r = np.array(residuals)
@@ -205,8 +209,6 @@ if __name__ == "__main__":
         # #attach the patch to the lidar map point
 
         # print(frame)
-        
-        time.sleep(0.01)
         print("Current state (x,y,z): ", state.p)
 
 

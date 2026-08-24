@@ -17,6 +17,16 @@ def project_points_to_frame(points, cam_imu_transform, glob_imu):
         pixel_coords = project(camera_coords)
         pixels.append(pixel_coords)
 
+def project_points_world(points, state, lidar_imu_extrinsic):
+    T_GI = np.eye(4)
+    points_world = []
+    T_GI[:3, :3] = state.R
+    T_GI[:3, 3] = state.p
+    for point_lidar in points:
+        point = T_GI @ lidar_imu_extrinsic @ np.append(point_lidar, 1)
+        points_world.append(point[:3])
+    return points_world
+
 def project(coords):
     #3D to pinhole camera projection
     u = focals[0]*coords[0]/coords[2] + center[0]
