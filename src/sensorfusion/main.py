@@ -112,6 +112,8 @@ if __name__ == "__main__":
                 imu_measurement_buffer = [m for m in imu_measurement_buffer if m[0] >= lidar_prev_scan_time]
                 continue # Skips to the camera logic
 
+            kalman_gain = None
+            H = None
             max_iterations = 10
             for iter_count in range(max_iterations):
                 points_world = []
@@ -183,11 +185,13 @@ if __name__ == "__main__":
                 state.bg += dx[9:12]
                 state.ba += dx[12:15]
                 state.g  += dx[15:18]
-            I = np.eye(cov.shape[0])
-            cov = (I - kalman_gain @ H) @ cov #covariance update
 
-            #add the lidar points to the map after the lidar based update is done
-            map.add_points(points_world)
+            #Prevent crash when there is no LiDAR update
+            if kalman_gain is not None and H is not None:
+                I = np.eye(cov.shape[0])
+                cov = (I - kalman_gain @ H) @ cov #covariance update
+                #add the lidar points to the map after the lidar based update is done
+                map.add_points(points_world)
             #buffer maintenance
             imu_measurement_buffer = [m for m in imu_measurement_buffer if m[0] >= lidar_prev_scan_time]
         #Get the camera scan at 10Hz
