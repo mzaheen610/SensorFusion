@@ -9,6 +9,7 @@ from utils.so3_rotation import skew, exp
 from utils.projections import project_points_to_frame, project_points_world
 from threading import Thread,Lock
 from collections import deque
+import copy
 
 state_lock = Lock()
 buffer_lock = Lock()
@@ -23,18 +24,35 @@ def imu_thread(imu, filter_ref):
         imu_data = imu.get_readings()
         if imu_data is None:
             continue
+        gyro, accel = imu_data
+        if gyro is None or accel is None:
+            continue
+
+        gyro = np.asarray(gyro, dtype=float)
+        accel = np.asarray(accel, dtype=float)
+
+        if (gyro.shape != (3,) or accel.shape != (3,)
+            or not np.all(np.isinfinite(gyro))
+            or not np.all(np.isinfinite(accel))
+            ):
+            continue
+
         with buffer_lock:
             #store the timestamp and imu readings for backpropogation of LiDAR points
-            imu_measurement_buffer.append((now, imu_data[0], imu_data[1]))
+            imu_measurement_buffer.append((now, gyro.copy(), accel.copy()))
         #Do the forward propogation
         if prev_time is None:
             prev_time = now
             continue
         dt = now - prev_time
+
+        # Reject impossible timing gaps after sensor/serial faults.
+        if dt <= 0.0 or dt > 0.1:
+            continue
         prev_time = now
         with state_lock:
-            state, cov = filter_ref.predict(imu_data, dt)
-            imu_state = (now, state) #store the timestamp and state for backpropogation of LiDAR points
+            state, cov = filter_ref.predict((gyro, accel), dt)
+            imu_state = (now, copy.deepcopy(state)) #store the timestamp and state for backpropogation of LiDAR points
             imu_state_buffer.append(imu_state)
 
 
@@ -55,10 +73,15 @@ if __name__ == "__main__":
     a_body = np.array(u[1])
     a_world = filter.state.R @ a_body
 
-    print("Body accel :", a_body)
-    print("World accel:", a_world)
-    print("Bias corrected acceleration:", (a_world - filter.state.ba))
+    a_body_corrected = a_body - filter.state.ba
+    a_world_corrected = filter.state.R @ a_body_corrected
+    linear_accel_world = a_world_corrected - filter.state.g
 
+    print("Body accel:", a_body)
+    print("Body accel corrected:", a_body_corrected)
+    print("World accel corrected:", a_world_corrected)
+    print("Linear world acceleration:", linear_accel_world)
+    
     lidar_prev_scan_time = {"time": time.time()}
 
     imu_worker = Thread(target=imu_thread, args=(imu, filter), daemon=True)
