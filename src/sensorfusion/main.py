@@ -32,8 +32,8 @@ def imu_thread(imu, filter_ref):
         accel = np.asarray(accel, dtype=float)
 
         if (gyro.shape != (3,) or accel.shape != (3,)
-            or not np.all(np.isinfinite(gyro))
-            or not np.all(np.isinfinite(accel))
+            or not np.all(np.isfinite(gyro))
+            or not np.all(np.isfinite(accel))
             ):
             continue
 
@@ -81,7 +81,7 @@ if __name__ == "__main__":
     print("Body accel corrected:", a_body_corrected)
     print("World accel corrected:", a_world_corrected)
     print("Linear world acceleration:", linear_accel_world)
-    
+
     lidar_prev_scan_time = {"time": time.time()}
 
     imu_worker = Thread(target=imu_thread, args=(imu, filter), daemon=True)
