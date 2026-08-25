@@ -6,6 +6,7 @@ IMU integration
 from dataclasses import dataclass
 from utils.so3_rotation import exp, skew
 import numpy as np
+from utils.projections import project_points_world
 #Kalman filter --- Prediction, Update/Correction
 
 @dataclass
@@ -19,7 +20,7 @@ class State:
 
 class ESIKFStateEstimator:
     def __init__(self):
-        self.P = np.eye(18) # process covariance matrix
+        self.P = 100 * np.eye(18) # process covariance matrix
         self.Q = np.eye(18) # process noise covariance
         self.R = np.eye(3) # measurement matrix
         dt = 0.01  # IMU is at 100Hz, so time step is 0.01 seconds
@@ -77,10 +78,131 @@ class ESIKFStateEstimator:
         self.P = A @ self.P @ A.T + self.Q
         return self.state, self.P
 
-    def update(self):
-        # Implement the update/correction step of the Kalman filter here
-        # After LIDAR data arrives and it is backward propogated
-        error_meas = self.R #measurement noise covariance
-        # gain = error_pred / (error_pred+ error_meas)
-        pass
+    def lidar_update(self, scan, state, lidar_points_compensated):
+        """
+        LiDAR based update.
+        When the LiDAR scan is motion compensated, do the residual computation 
+        and update the state using the ESIKF filter.
+        """
+        #first transform the LiDAR points to the world frame using the current state
+        lidar_imu_extrinsic = np.eye(4) #assuming the LiDAR and IMU are co-located
+        global_imu_extrinsic = np.eye(4) #assuming the IMU is at the origin of the world frame (to transform imu to global)
+        camera_imu_extrinsic = np.eye(4)
+        T_GI = np.eye(4) #homogeneous transformation matrix built from current ESIKF state at the scan end time t_k.
 
+        # for point in lidar_points_compensated:
+        #     # Transform each point from lidar frame to the world frame based on current pose
+        #     point_world = T_GI @ lidar_imu_extrinsic @ np.append(point, 1)
+        #     points_world.append(point_world[:3])  # Extract the 3D coordinates
+
+        #Compute the residuals between each point and the nearest plane in the world map
+        total_res = 0
+        # state_updated = np.array()
+        eps = 0.01
+        MIN_INITIAL_POINTS = 30
+
+        #Iterated Kalman Update
+        if scan is not None:
+            #Skip update for the initial scan
+            if map.num_points() < MIN_INITIAL_POINTS:
+                #add lidar points directly to the map for initial scans
+                points_world = project_points_world(lidar_points_compensated,
+                                                    state, lidar_imu_extrinsic)
+                map.add_points(points_world)
+                print("Not enough points in the map")
+                return
+
+            if map.is_empty():
+                points_world = []
+                T_GI[:3, :3] = state.R
+                T_GI[:3, 3] = state.p
+                # for point_lidar in lidar_points_compensated:
+                #     point = T_GI @ lidar_imu_extrinsic @ np.append(point_lidar, 1)
+                #     points_world.append(point[:3])
+                points_world = (T_GI @ lidar_imu_extrinsic @ lidar_points_compensated.T).T
+                map.add_points(points_world)
+                
+                # Clean up IMU buffer and skip EKF update
+                # imu_measurement_buffer = [m for m in imu_measurement_buffer if m[0] >= lidar_prev_scan_time]
+                return # Skips to the camera logic
+
+            kalman_gain = None
+            H = None
+            max_iterations = 10
+            for iter_count in range(max_iterations):
+                points_world = []
+                H_list = []
+                residuals = []
+                T_GI[:3, :3] = state.R
+                T_GI[:3, 3] = state.p
+
+                for point_lidar in lidar_points_compensated:
+
+                    # Transform each point from lidar frame to the world frame based on current pose
+                    point = T_GI @ lidar_imu_extrinsic @ np.append(point_lidar, 1)
+                    points_world.append(point[:3])  # Extract the 3D coordinates
+                    point = point[:3]
+
+                    #find the k nearest points from the global map and fit a plane
+                    # 4. Fit a plane using SVD
+                    neighbors = map.query(point)
+                    if neighbors is None or (len(neighbors) < 3):
+                        continue
+                    center = np.mean(neighbors, axis=0) 
+                    centered_neighbors = neighbors - center
+                    #find the normal to the plane based on the SVD
+                    _, _, vh = np.linalg.svd(centered_neighbors)
+                    normal = vh[-1, :]  # Plane normal vector
+                    #find the residual based on the normal and the center point
+                    vec = point - center
+                    res = np.dot(normal, vec)
+                    residuals.append(res)
+                    #lidar jacobian computation
+                    H_pos = normal.T
+                    H_rot = -normal @ state.R @ skew(point_lidar)
+                    H_k = np.hstack([
+                        H_rot,
+                        H_pos,
+                        np.zeros(3),  # velocity
+                        np.zeros(3),  # gyro bias
+                        np.zeros(3),  # accel bias
+                        np.zeros(3),  # gravity  
+                    ])      
+                    H_list.append(H_k)
+
+                if len(H_list) == 0:
+                    print("No valid LiDAR points for EKF update")
+                    break
+
+                H = np.vstack(H_list)
+                r = np.array(residuals)
+
+                error_pred = self.P @ H.T
+                sigma_lidar = 0.02
+                # lidar_sensor_noise = sigma_lidar**2 * np.eye(len(r)) #error in the lidar measurement
+                # error_meas = H @ cov @ H.T + lidar_sensor_noise
+                # kalman_gain = error_pred @ np.linalg.inv(error_meas) #calculating the Kalman Gain
+
+                R_inv = (1.0 / sigma_lidar**2) * np.eye(len(r)) 
+                P_inv = np.linalg.inv(self.P)
+                kalman_gain = np.linalg.inv(H.T @ R_inv @ H + P_inv) @ (H.T @ R_inv)
+
+                dx = kalman_gain @ r #error-state vector
+
+                if np.linalg.norm(dx) < eps:
+                    break
+
+                theta_rot = dx[0:3]
+                state.R = state.R @ exp(theta_rot)
+                state.p  += dx[3:6]
+                state.v  += dx[6:9]
+                state.bg += dx[9:12]
+                state.ba += dx[12:15]
+                state.g  += dx[15:18]
+
+            #Prevent crash when there is no LiDAR update
+            if kalman_gain is not None and H is not None:
+                I = np.eye(self.P.shape[0])
+                self.P = (I - kalman_gain @ H) @ self.P #covariance update
+
+            return points_world
