@@ -78,7 +78,7 @@ class ESIKFStateEstimator:
         self.P = A @ self.P @ A.T + self.Q
         return self.state, self.P
 
-    def lidar_update(self, scan, state, lidar_points_compensated):
+    def lidar_update(self, scan, state, lidar_points_compensated, map):
         """
         LiDAR based update.
         When the LiDAR scan is motion compensated, do the residual computation 

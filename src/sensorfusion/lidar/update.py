@@ -4,33 +4,44 @@ Implementation of the Lidar thread helper
 import copy
 import time
 import numpy as np
-from backward import backprop
+from lidar.backward import backprop
 
-def lidar_thread(state_lock, buffer_lock, filter, lidar):
+def lidar_thread(state_lock, buffer_lock, filter, lidar, map, imu_measurement_buffer, lidar_prev_scan_time):
     """
     Backward propogation
     """
-    #After forward propogation the LiDAR points are backpropogated when the scan arrives
-    scan = lidar.get_readings()
-    with state_lock:
-        state = copy.deepcopy(filter.state)
-    if scan is not None:
+    while True:
+        scan = lidar.get_readings()
+        if scan is None:
+            time.sleep(0.01)
+            continue
+
+        with state_lock:
+            state = copy.deepcopy(filter.state)
+        with buffer_lock:
+            imu_buffer = list(imu_measurement_buffer)
+
         now = time.time()
-        lidar_points_compensated = backprop(now, lidar_prev_scan_time, state, scan, imu_measurement_buffer)
-        lidar_prev_scan_time = now
-        for i in range(5):
+        lidar_points_compensated = backprop(
+            now, lidar_prev_scan_time["time"], state, scan, imu_buffer
+        )
+        lidar_prev_scan_time["time"] = now
+        for i in range(min(5, len(scan))):
             print("Original LiDAR points: ", scan[i])
-        for i in range(5):
+        for i in range(min(5, len(lidar_points_compensated))):
             print("Compensated LiDAR points: ", lidar_points_compensated[i])
         print("Current position: ", state.p)
 
-    """
-    Lidar Update
-    """
-    points_world = filter.lidar_update(scan, filter.state, lidar_points_compensated )
-    #add the lidar points to the map after the lidar based update is done
-    map.add_points(points_world)
+        with state_lock:
+            points_world = filter.lidar_update(
+                scan, state, lidar_points_compensated, map
+            )
+            if points_world is not None:
+                filter.state = state
+                map.add_points(points_world)
 
-    #buffer maintenance
-    with buffer_lock:
-        imu_measurement_buffer = [m for m in imu_measurement_buffer if m[0] >= lidar_prev_scan_time]
+        with buffer_lock:
+            imu_measurement_buffer.clear()
+            imu_measurement_buffer.extend(
+                m for m in imu_buffer if m[0] >= lidar_prev_scan_time["time"]
+            )

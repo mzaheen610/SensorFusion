@@ -13,24 +13,27 @@ from collections import deque
 state_lock = Lock()
 buffer_lock = Lock()
 imu_measurement_buffer = deque()
+imu_state_buffer = deque()
 filter = ESIKFStateEstimator()
 
-def imu_thread(imu):
+def imu_thread(imu, filter_ref):
     prev_time = None
     while True:
         now = time.time()
         imu_data = imu.get_readings()
+        if imu_data is None:
+            continue
         with buffer_lock:
             #store the timestamp and imu readings for backpropogation of LiDAR points
             imu_measurement_buffer.append((now, imu_data[0], imu_data[1]))
         #Do the forward propogation
-        if prev is None:
-            prev = now
+        if prev_time is None:
+            prev_time = now
             continue
-        dt = now - prev
-        prev = now
+        dt = now - prev_time
+        prev_time = now
         with state_lock:
-            state, cov = filter.predict(imu_data, dt)
+            state, cov = filter_ref.predict(imu_data, dt)
             imu_state = (now, state) #store the timestamp and state for backpropogation of LiDAR points
             imu_state_buffer.append(imu_state)
 
@@ -56,16 +59,17 @@ if __name__ == "__main__":
     print("World accel:", a_world)
     print("Bias corrected acceleration:", (a_world - filter.state.ba))
 
-    prev = time.time()
-    imu_state_buffer = []
-    # imu_measurement_buffer = []
-    lidar_prev_scan_time = time.time()
+    lidar_prev_scan_time = {"time": time.time()}
 
-    imu_thread = Thread(target=imu_thread, args=(imu,), daemon=True)
-    imu_thread.start()
+    imu_worker = Thread(target=imu_thread, args=(imu, filter), daemon=True)
+    imu_worker.start()
 
-    lidar_thread = Thread(target=imu_thread, args=(state_lock, buffer_lock, filter, lidar), daemon=True)
-    lidar_thread.start()
+    lidar_worker = Thread(
+        target=lidar_thread,
+        args=(state_lock, buffer_lock, filter, lidar, map, imu_measurement_buffer, lidar_prev_scan_time),
+        daemon=True,
+    )
+    lidar_worker.start()
 
     while(True):
         # now = time.time()
@@ -122,6 +126,8 @@ if __name__ == "__main__":
         # #attach the patch to the lidar map point
 
         # print(frame)
-        print("Current state (x,y,z): ", state.p)
+        with state_lock:
+            state = filter.state
+            print("Current state (x,y,z): ", state.p)
 
 
