@@ -10,6 +10,10 @@ def lidar_thread(state_lock, buffer_lock, filter, lidar, map, imu_measurement_bu
     """
     Backward propogation
     """
+    scan_count = 0
+    update_count = 0
+    rate_started = time.monotonic()
+    rate_last_report = rate_started
     while True:
         scan = lidar.get_readings()
         if scan is None:
@@ -36,9 +40,24 @@ def lidar_thread(state_lock, buffer_lock, filter, lidar, map, imu_measurement_bu
             points_world = filter.lidar_update(
                 scan, state, lidar_points_compensated, map
             )
+            scan_count += 1
+            if filter.last_lidar_update_applied:
+                update_count += 1
             if points_world is not None:
                 filter.state = state
                 map.add_points(points_world)
+
+        report_time = time.monotonic()
+        if report_time - rate_last_report >= 1.0:
+            elapsed = report_time - rate_started
+            scan_rate = scan_count / elapsed if elapsed > 0 else 0.0
+            update_rate = update_count / elapsed if elapsed > 0 else 0.0
+            print(
+                f"LiDAR scan rate: {scan_rate:.2f} Hz | EKF update rate: "
+                f"{update_rate:.2f} Hz | latest residuals: "
+                f"{filter.last_lidar_residual_count}"
+            )
+            rate_last_report = report_time
 
         with buffer_lock:
             imu_measurement_buffer.clear()

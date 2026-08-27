@@ -32,6 +32,10 @@ class ESIKFStateEstimator:
             ba = np.zeros(3),
             g = np.array([0,0,-9.81]),
         )
+        # Runtime diagnostics consumed by the LiDAR worker.
+        self.last_lidar_update_applied = False
+        self.last_lidar_residual_count = 0
+        self.last_lidar_residual_norm = None
     def compute_jacobian(self, x_prev, u, dt):
         #Computing Jacobian of the state model wrt the state error delta_x
         # dt = dt
@@ -97,6 +101,9 @@ class ESIKFStateEstimator:
 
         #Compute the residuals between each point and the nearest plane in the world map
         total_res = 0
+        self.last_lidar_update_applied = False
+        self.last_lidar_residual_count = 0
+        self.last_lidar_residual_norm = None
         # state_updated = np.array()
         eps = 0.01
         MIN_INITIAL_POINTS = 30
@@ -198,6 +205,8 @@ class ESIKFStateEstimator:
 
                 H = np.vstack(H_list)
                 r = -np.asarray(residuals)
+                self.last_lidar_residual_count = len(r)
+                self.last_lidar_residual_norm = float(np.linalg.norm(r))
 
                 print("Residual norm", np.linalg.norm(r))
 
@@ -229,5 +238,6 @@ class ESIKFStateEstimator:
             if kalman_gain is not None and H is not None:
                 I = np.eye(self.P.shape[0])
                 self.P = (I - kalman_gain @ H) @ self.P #covariance update
+                self.last_lidar_update_applied = True
 
             return points_world
