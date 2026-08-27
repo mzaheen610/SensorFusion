@@ -121,7 +121,7 @@ class ESIKFStateEstimator:
                 map.add_points(points_world)
                 if DEBUG_LIDAR:
                     print("Not enough points in the map")
-                return
+                return None, False
 
             if map.is_empty():
                 points_world = []
@@ -135,7 +135,7 @@ class ESIKFStateEstimator:
                 
                 # Clean up IMU buffer and skip EKF update
                 # imu_measurement_buffer = [m for m in imu_measurement_buffer if m[0] >= lidar_prev_scan_time]
-                return # Skips to the camera logic
+                return points_world, False # Skips to the camera logic
 
             kalman_gain = None
             H = None
@@ -251,4 +251,6 @@ class ESIKFStateEstimator:
                 self.P = (I - kalman_gain @ H) @ self.P #covariance update
                 self.last_lidar_update_applied = True
 
-            return points_world
+            return points_world, self.last_lidar_update_applied
+
+        return None, False

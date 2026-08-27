@@ -26,6 +26,9 @@ def lidar_thread(state_lock, buffer_lock, filter, lidar, map, imu_measurement_bu
 
         with state_lock:
             state = copy.deepcopy(filter.state)
+        # Keep the exact pre-update snapshot so only the correction delta can
+        # be merged into the state that IMU prediction advances concurrently.
+        state_old = copy.deepcopy(state)
         with buffer_lock:
             imu_buffer = list(imu_measurement_buffer)
 
@@ -41,15 +44,25 @@ def lidar_thread(state_lock, buffer_lock, filter, lidar, map, imu_measurement_bu
                 print("Compensated LiDAR points: ", lidar_points_compensated[i])
             print("Current position: ", state.p)
 
+        points_world, update_applied = filter.lidar_update(
+            scan, state, lidar_points_compensated, map
+        )
         with state_lock:
-            points_world = filter.lidar_update(
-                scan, state, lidar_points_compensated, map
-            )
             scan_count += 1
-            if filter.last_lidar_update_applied:
+            if update_applied:
                 update_count += 1
+                # Merge the correction computed from state_old into the latest
+                # IMU-predicted state; never replace it with a stale snapshot.
+                delta_p = state.p - state_old.p
+                delta_v = state.v - state_old.v
+                delta_R = state_old.R.T @ state.R
+                filter.state.p += delta_p
+                filter.state.v += delta_v
+                filter.state.R = filter.state.R @ delta_R
+                filter.state.bg = state.bg
+                filter.state.ba = state.ba
+                filter.state.g = state.g
             if points_world is not None:
-                filter.state = state
                 map.add_points(points_world)
 
         report_time = time.monotonic()
@@ -57,12 +70,12 @@ def lidar_thread(state_lock, buffer_lock, filter, lidar, map, imu_measurement_bu
             elapsed = report_time - rate_started
             scan_rate = scan_count / elapsed if elapsed > 0 else 0.0
             update_rate = update_count / elapsed if elapsed > 0 else 0.0
-            # if DEBUG_LIDAR:
-            print(
-                f"LiDAR scan rate: {scan_rate:.2f} Hz | EKF update rate: "
-                f"{update_rate:.2f} Hz | latest residuals: "
-                f"{filter.last_lidar_residual_count}"
-            )
+            if DEBUG_LIDAR:
+                print(
+                    f"LiDAR scan rate: {scan_rate:.2f} Hz | EKF update rate: "
+                    f"{update_rate:.2f} Hz | latest residuals: "
+                    f"{filter.last_lidar_residual_count}"
+                )
             rate_last_report = report_time
 
         with buffer_lock:
