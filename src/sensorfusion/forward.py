@@ -153,11 +153,25 @@ class ESIKFStateEstimator:
                     centered_neighbors = neighbors - center
                     #find the normal to the plane based on the SVD
                     _, s, vh = np.linalg.svd(centered_neighbors)
-                    normal = vh[-1, :]  # Plane normal vector
-                    print("Singular Values for plane:", s)
-                    #find the residual based on the normal and the center point
-                    vec = point - center
-                    res = float(np.dot(normal, vec))
+
+                    if s[0] < 1e-6:
+                        continue  # degenerate, no structure
+                    ratio = s[1] / s[0]
+                    if ratio > 0.3:
+                        normal = vh[-1, :]  # Plane normal vector
+                        print("Singular Values for plane:", s)
+                        #find the residual based on the normal and the center point
+                        vec = point - center
+                        res = float(np.dot(normal, vec))
+                    elif s[1] / s[0] < 0.15:  # optional stricter check, or just an else
+                        # Edge/line feature: point-to-line residual instead of discarding
+                        direction = vh[0, :]  # principal direction of the line
+                        vec = point - center
+                        perp = vec - np.dot(vec, direction) * direction  # component perpendicular to the line
+                        res = float(np.linalg.norm(perp))
+                        normal = perp / (res + 1e-9)  # "normal" here is the residual direction for the Jacobian
+                    else:
+                        continue  # ambiguous, skip
                     #reject large residuals
                     if abs(res) > 0.20:
                         continue
