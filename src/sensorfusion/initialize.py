@@ -115,6 +115,10 @@ class IMU:
         
         # Calculate what gravity should look like in the body frame
         expected_g_body = R_theta.T @ g_world_actual
+
+        aligned_gravity = R_theta @ g_body
+
+        print("Aligned gravity:", aligned_gravity)
         
         # Bias is the difference between the actual reading and the expected gravity
         ba = a_mean - expected_g_body

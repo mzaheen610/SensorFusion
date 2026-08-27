@@ -22,6 +22,7 @@ def imu_thread(imu, filter_ref):
     while True:
         now = time.time()
         imu_data = imu.get_readings()
+        #Reject none values and validate the readings 
         if imu_data is None:
             continue
         gyro, accel = imu_data
