@@ -83,6 +83,22 @@ if __name__ == "__main__":
     print("World accel corrected:", a_world_corrected)
     print("Linear world acceleration:", linear_accel_world)
 
+    residuals = []
+
+    for _ in range(100):
+        reading = imu.get_readings()
+
+        if reading is not None:
+            _, accel = reading
+            residuals.append(
+                filter.state.R @ (accel - filter.state.ba)
+                - filter.state.g
+            )
+
+        time.sleep(0.01)
+
+    print("Mean stationary residual:", np.mean(residuals, axis=0))
+    
     lidar_prev_scan_time = {"time": time.time()}
 
     imu_worker = Thread(target=imu_thread, args=(imu, filter), daemon=True)

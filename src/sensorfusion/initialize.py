@@ -74,12 +74,12 @@ class IMU:
     def initialize_rotation_gyro(self):
         #Find the initial rotation matrix from the IMU readings
         #Collect 5s of IMU data to get the mean acceleration
-        # self.wait_for_calibration()
+        self.wait_for_calibration()
         curr_time = time.time()
         accel_data = []
         gyro_data = []
         
-        while(time.time() - curr_time < 5):
+        while(time.time() - curr_time < 10):
             accel = self.sensor.acceleration
             gyro = self.sensor.gyro
             if _is_valid_reading(gyro):
@@ -120,9 +120,9 @@ class IMU:
 
         print("Aligned gravity:", aligned_gravity)
 
-        # Bias is initialized with zeros to prevent over compensation
-        #bias will be learned by the filter later
-        ba = np.zeros(3) 
+        #Estimate the bias
+        ba = a_mean- expected_g_body
+
         return R_theta, bg, ba
     
 class Lidar:
