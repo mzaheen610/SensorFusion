@@ -119,9 +119,10 @@ class IMU:
         aligned_gravity = R_theta @ g_body
 
         print("Aligned gravity:", aligned_gravity)
-        
-        # Bias is the difference between the actual reading and the expected gravity
-        ba = a_mean - expected_g_body
+
+        # Bias is initialized with zeros to prevent over compensation
+        #bias will be learned by the filter later
+        ba = np.zeros(3) 
         return R_theta, bg, ba
     
 class Lidar:
