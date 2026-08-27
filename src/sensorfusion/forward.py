@@ -148,6 +148,7 @@ class ESIKFStateEstimator:
                     neighbors = map.query(point)
                     if neighbors is None or (len(neighbors) < 3):
                         continue
+                    print("Number of neigbors for a point", len(neighbors))
                     center = np.mean(neighbors, axis=0) 
                     centered_neighbors = neighbors - center
                     #find the normal to the plane based on the SVD
@@ -156,7 +157,10 @@ class ESIKFStateEstimator:
                     print("Singular Values for plane:", s)
                     #find the residual based on the normal and the center point
                     vec = point - center
-                    res = np.dot(normal, vec)
+                    res = float(np.dot(normal, vec))
+                    #reject large residuals
+                    if abs(res) > 0.20:
+                        continue
                     print("Plane residual:", res)
                     residuals.append(res)
                     #lidar jacobian computation
@@ -179,7 +183,7 @@ class ESIKFStateEstimator:
                 print("Len of H_list", len(H_list))
 
                 H = np.vstack(H_list)
-                r = np.array(residuals)
+                r = -np.asarray(residuals)
 
                 print("Residual norm", np.linalg.norm(r))
 
