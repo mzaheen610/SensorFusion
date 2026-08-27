@@ -145,9 +145,10 @@ class Lidar:
         try:
             self.lidar.stop()
             self.lidar.stop_motor()
+            self.lidar.reset()
             self.lidar.disconnect()
-        except Exception:
-            pass
+        except Exception as e:
+            print(f"Error occurred while fetching LiDAR readings: {type(e).__name__}: {e}")
 
         # The motor is already warm during runtime; a short delay is enough
         # after reconnect and avoids reducing the scan stream to ~0.2 Hz.

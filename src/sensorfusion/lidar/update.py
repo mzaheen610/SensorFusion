@@ -6,6 +6,10 @@ import time
 import numpy as np
 from lidar.backward import backprop
 
+# Set to True when inspecting individual scans. Keep False during normal runs
+# because console I/O can noticeably reduce throughput on a Raspberry Pi.
+DEBUG_LIDAR = False
+
 def lidar_thread(state_lock, buffer_lock, filter, lidar, map, imu_measurement_buffer, lidar_prev_scan_time):
     """
     Backward propogation
@@ -30,11 +34,12 @@ def lidar_thread(state_lock, buffer_lock, filter, lidar, map, imu_measurement_bu
             now, lidar_prev_scan_time["time"], state, scan, imu_buffer
         )
         lidar_prev_scan_time["time"] = now
-        for i in range(min(5, len(scan))):
-            print("Original LiDAR points: ", scan[i])
-        for i in range(min(5, len(lidar_points_compensated))):
-            print("Compensated LiDAR points: ", lidar_points_compensated[i])
-        print("Current position: ", state.p)
+        if DEBUG_LIDAR:
+            for i in range(min(5, len(scan))):
+                print("Original LiDAR points: ", scan[i])
+            for i in range(min(5, len(lidar_points_compensated))):
+                print("Compensated LiDAR points: ", lidar_points_compensated[i])
+            print("Current position: ", state.p)
 
         with state_lock:
             points_world = filter.lidar_update(
@@ -52,6 +57,7 @@ def lidar_thread(state_lock, buffer_lock, filter, lidar, map, imu_measurement_bu
             elapsed = report_time - rate_started
             scan_rate = scan_count / elapsed if elapsed > 0 else 0.0
             update_rate = update_count / elapsed if elapsed > 0 else 0.0
+            # if DEBUG_LIDAR:
             print(
                 f"LiDAR scan rate: {scan_rate:.2f} Hz | EKF update rate: "
                 f"{update_rate:.2f} Hz | latest residuals: "

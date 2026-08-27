@@ -119,7 +119,8 @@ class ESIKFStateEstimator:
                 points_world = project_points_world(lidar_points_compensated,
                                                     state, lidar_imu_extrinsic)
                 map.add_points(points_world)
-                print("Not enough points in the map")
+                if DEBUG_LIDAR:
+                    print("Not enough points in the map")
                 return
 
             if map.is_empty():
@@ -204,7 +205,8 @@ class ESIKFStateEstimator:
                     H_list.append(H_k)
 
                 if len(H_list) == 0:
-                    print("No valid LiDAR points for EKF update")
+                    if DEBUG_LIDAR:
+                        print("No valid LiDAR points for EKF update")
                     break
 
                 if DEBUG_LIDAR:
