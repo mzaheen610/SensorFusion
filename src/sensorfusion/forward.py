@@ -151,11 +151,13 @@ class ESIKFStateEstimator:
                     center = np.mean(neighbors, axis=0) 
                     centered_neighbors = neighbors - center
                     #find the normal to the plane based on the SVD
-                    _, _, vh = np.linalg.svd(centered_neighbors)
+                    _, s, vh = np.linalg.svd(centered_neighbors)
                     normal = vh[-1, :]  # Plane normal vector
+                    print("Singular Values for plane:", s)
                     #find the residual based on the normal and the center point
                     vec = point - center
                     res = np.dot(normal, vec)
+                    print("Plane residual:", res)
                     residuals.append(res)
                     #lidar jacobian computation
                     H_pos = normal.T
@@ -174,10 +176,14 @@ class ESIKFStateEstimator:
                     print("No valid LiDAR points for EKF update")
                     break
 
+                print("Len of H_list", len(H_list))
+
                 H = np.vstack(H_list)
                 r = np.array(residuals)
 
-                error_pred = self.P @ H.T
+                print("Residual norm", np.linalg.norm(r))
+
+                # error_pred = self.P @ H.T
                 sigma_lidar = 0.02
                 # lidar_sensor_noise = sigma_lidar**2 * np.eye(len(r)) #error in the lidar measurement
                 # error_meas = H @ cov @ H.T + lidar_sensor_noise
@@ -189,6 +195,7 @@ class ESIKFStateEstimator:
 
                 dx = kalman_gain @ r #error-state vector
 
+                print("State correction error norm", np.linalg.norm(dx))
                 if np.linalg.norm(dx) < eps:
                     break
 
