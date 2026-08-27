@@ -7,6 +7,9 @@ from dataclasses import dataclass
 from utils.so3_rotation import exp, skew
 import numpy as np
 from utils.projections import project_points_world
+# Per-point logging is extremely expensive on a Raspberry Pi. Enable only when
+# diagnosing a specific scan.
+DEBUG_LIDAR = False
 #Kalman filter --- Prediction, Update/Correction
 
 @dataclass
@@ -155,7 +158,8 @@ class ESIKFStateEstimator:
                     neighbors = map.query(point)
                     if neighbors is None or (len(neighbors) < 3):
                         continue
-                    print("Number of neigbors for a point", len(neighbors))
+                    if DEBUG_LIDAR:
+                        print("Number of neighbors for a point", len(neighbors))
                     center = np.mean(neighbors, axis=0) 
                     centered_neighbors = neighbors - center
                     #find the normal to the plane based on the SVD
@@ -166,7 +170,8 @@ class ESIKFStateEstimator:
                     ratio = s[1] / s[0]
                     if ratio > 0.3:
                         normal = vh[-1, :]  # Plane normal vector
-                        print("Singular Values for plane:", s)
+                        if DEBUG_LIDAR:
+                            print("Singular Values for plane:", s)
                         #find the residual based on the normal and the center point
                         vec = point - center
                         res = float(np.dot(normal, vec))
@@ -182,7 +187,8 @@ class ESIKFStateEstimator:
                     #reject large residuals
                     if abs(res) > 0.20:
                         continue
-                    print("Plane residual:", res)
+                    if DEBUG_LIDAR:
+                        print("Plane residual:", res)
                     residuals.append(res)
                     #lidar jacobian computation
                     H_pos = normal.T
@@ -201,14 +207,16 @@ class ESIKFStateEstimator:
                     print("No valid LiDAR points for EKF update")
                     break
 
-                print("Len of H_list", len(H_list))
+                if DEBUG_LIDAR:
+                    print("Len of H_list", len(H_list))
 
                 H = np.vstack(H_list)
                 r = -np.asarray(residuals)
                 self.last_lidar_residual_count = len(r)
                 self.last_lidar_residual_norm = float(np.linalg.norm(r))
 
-                print("Residual norm", np.linalg.norm(r))
+                if DEBUG_LIDAR:
+                    print("Residual norm", np.linalg.norm(r))
 
                 # error_pred = self.P @ H.T
                 sigma_lidar = 0.02
@@ -222,7 +230,8 @@ class ESIKFStateEstimator:
 
                 dx = kalman_gain @ r #error-state vector
 
-                print("State correction error norm", np.linalg.norm(dx))
+                if DEBUG_LIDAR:
+                    print("State correction error norm", np.linalg.norm(dx))
                 if np.linalg.norm(dx) < eps:
                     break
 

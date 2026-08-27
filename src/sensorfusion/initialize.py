@@ -134,9 +134,11 @@ class Lidar:
         self.lidar = RPLidar(self.port, baudrate=256000, timeout=3)
         self.lidar.get_health = lambda: ('Good', 0)
         self.lidar.connect()
-        self.lidar.start_motor()
+        # Flush stale bytes before starting a new stream.  Flushing after the
+        # motor starts can discard the beginning of a valid descriptor.
         self.lidar.clean_input()
-        time.sleep(4)  # Allow the motor to spin up
+        self.lidar.start_motor()
+        time.sleep(getattr(self, "_spinup_delay", 4.0))
         self._scans = self.lidar.iter_scans(max_buf_meas=12000)
 
     def _reopen_lidar(self):
@@ -147,8 +149,11 @@ class Lidar:
         except Exception:
             pass
 
-        time.sleep(1)
+        # The motor is already warm during runtime; a short delay is enough
+        # after reconnect and avoids reducing the scan stream to ~0.2 Hz.
+        self._spinup_delay = 0.5
         self._open_lidar()
+        self._spinup_delay = 4.0
 
     def get_readings(self):
         try:
@@ -170,5 +175,4 @@ class CameraSensor:
         frame = self.camera.capture_array()
         return frame
     
-
 
