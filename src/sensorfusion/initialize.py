@@ -165,25 +165,30 @@ class Lidar:
         except Exception as e:
             print(f"Error while reopening LiDAR: {type(e).__name__}: {e}")
             raise
-
     def get_readings(self):
         attempts = 0
         while attempts < self.max_reconnect_attempts:
             try:
                 return next(self._scans)
             except Exception as e:
-                print(f"Error occurred while fetching LiDAR readings: "
-                      f"{type(e).__name__}: {e}")
+                error_msg = str(e)
+                print(f"LiDAR exception: {type(e).__name__}: {error_msg}")
+                
+                # Check for parsing desyncs (dropped bytes)
+                if any(x in error_msg for x in ["Check bit", "descriptor", "mismatch"]):
+                    # Soft reset: flush buffer and recreate generator, keep motor spinning
+                    self.lidar.clean_input()
+                    self._scans = self.lidar.iter_scans(max_buf_meas=12000)
+                    continue # Retry immediately without punishing the attempt counter
+
+                # Hard reset for actual hardware disconnects
                 attempts += 1
                 try:
                     self._reopen_lidar()
                 except Exception:
-                    # backoff before the next attempt so a persistent
-                    # fault (unplugged device, dead port) doesn't spin
-                    # tight retries
                     time.sleep(min(2 ** attempts, 30))
-        print(f"Giving up after {self.max_reconnect_attempts} reconnect "
-              f"attempts.")
+                    
+        print(f"Giving up after {self.max_reconnect_attempts} reconnect attempts.")
         return None
 
 class CameraSensor:
