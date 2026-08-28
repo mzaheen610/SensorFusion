@@ -126,44 +126,65 @@ class IMU:
         return R_theta, bg, ba
     
 class Lidar:
-    def __init__(self, port='/dev/ttyUSB0'):
+    def __init__(self, port='/dev/ttyUSB0', max_reconnect_attempts=5):
         self.port = port
-        self._open_lidar()
+        self.max_reconnect_attempts = max_reconnect_attempts
+        self._open_lidar(spinup_delay=4.0)
 
-    def _open_lidar(self):
+    def _open_lidar(self, spinup_delay=4.0):
         self.lidar = RPLidar(self.port, baudrate=256000, timeout=3)
         self.lidar.get_health = lambda: ('Good', 0)
         self.lidar.connect()
-        # Flush stale bytes before starting a new stream.  Flushing after the
-        # motor starts can discard the beginning of a valid descriptor.
-        self.lidar.clean_input()
         self.lidar.start_motor()
-        time.sleep(getattr(self, "_spinup_delay", 4.0))
+        time.sleep(spinup_delay)
+        self.lidar.clean_input()
         self._scans = self.lidar.iter_scans(max_buf_meas=12000)
 
-    def _reopen_lidar(self):
-        try:
-            self.lidar.stop()
-            self.lidar.stop_motor()
-            self.lidar.reset()
-            self.lidar.disconnect()
-        except Exception as e:
-            print(f"Error occurred while fetching LiDAR readings: {type(e).__name__}: {e}")
+    def _close_lidar(self):
+        # Each teardown step gets its own try/except so one failure
+        # doesn't skip the others (especially disconnect(), which
+        # frees the serial port for the next open).
+        for step in (self.lidar.stop, self.lidar.stop_motor,
+                     self.lidar.reset, self.lidar.disconnect):
+            try:
+                step()
+            except Exception as e:
+                print(f"Error during LiDAR teardown ({step.__name__}): "
+                      f"{type(e).__name__}: {e}")
 
-        # The motor is already warm during runtime; a short delay is enough
-        # after reconnect and avoids reducing the scan stream to ~0.2 Hz.
-        self._spinup_delay = 0.5
-        self._open_lidar()
-        self._spinup_delay = 4.0
+    def _reopen_lidar(self):
+        self._close_lidar()
+
+        # The motor is usually still warm during a runtime reconnect, so a
+        # short delay is normally enough and avoids reducing the scan
+        # stream to ~0.2 Hz. If the motor actually spun down (e.g. a
+        # power/USB drop), this may not be long enough — that's a
+        # known tradeoff, not an oversight.
+        try:
+            self._open_lidar(spinup_delay=0.5)
+        except Exception as e:
+            print(f"Error while reopening LiDAR: {type(e).__name__}: {e}")
+            raise
 
     def get_readings(self):
-        try:
-            scan = next(self._scans)
-            return scan
-        except Exception as e:
-            print(f"Error occurred while fetching LiDAR readings: {e}")
-            self._reopen_lidar()
-            return None
+        attempts = 0
+        while attempts < self.max_reconnect_attempts:
+            try:
+                return next(self._scans)
+            except Exception as e:
+                print(f"Error occurred while fetching LiDAR readings: "
+                      f"{type(e).__name__}: {e}")
+                attempts += 1
+                try:
+                    self._reopen_lidar()
+                except Exception:
+                    # backoff before the next attempt so a persistent
+                    # fault (unplugged device, dead port) doesn't spin
+                    # tight retries
+                    time.sleep(min(2 ** attempts, 30))
+        print(f"Giving up after {self.max_reconnect_attempts} reconnect "
+              f"attempts.")
+        return None
 
 class CameraSensor:
     def __init__(self):
