@@ -18,7 +18,7 @@ def lidar_acquisition_thread(lidar, scan_queue):
     while True:
         scan = lidar.get_readings()
         if scan is None:
-            time.sleep(0.01)
+            # time.sleep(0.01)
             continue
 
         # Processing must never make the serial reader wait.  Retain only the
