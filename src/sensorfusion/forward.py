@@ -97,11 +97,6 @@ class ESIKFStateEstimator:
         camera_imu_extrinsic = np.eye(4)
         T_GI = np.eye(4) #homogeneous transformation matrix built from current ESIKF state at the scan end time t_k.
 
-        # for point in lidar_points_compensated:
-        #     # Transform each point from lidar frame to the world frame based on current pose
-        #     point_world = T_GI @ lidar_imu_extrinsic @ np.append(point, 1)
-        #     points_world.append(point_world[:3])  # Extract the 3D coordinates
-
         #Compute the residuals between each point and the nearest plane in the world map
         total_res = 0
         self.last_lidar_update_applied = False
@@ -110,6 +105,7 @@ class ESIKFStateEstimator:
         # state_updated = np.array()
         eps = 0.01
         MIN_INITIAL_POINTS = 30
+        P_new = P_copy # Default fallback
 
         #Iterated Kalman Update
         if scan is not None:
@@ -127,69 +123,91 @@ class ESIKFStateEstimator:
                 points_world = []
                 T_GI[:3, :3] = state.R
                 T_GI[:3, 3] = state.p
-                # for point_lidar in lidar_points_compensated:
-                #     point = T_GI @ lidar_imu_extrinsic @ np.append(point_lidar, 1)
-                #     points_world.append(point[:3])
-                points_world = (T_GI @ lidar_imu_extrinsic @ lidar_points_compensated.T).T
+                
+                # Generate homogeneous coordinates manually to avoid broadcast errors
+                lidar_homo = np.hstack([lidar_points_compensated, np.ones((len(lidar_points_compensated), 1))])
+                points_world = (T_GI @ lidar_imu_extrinsic @ lidar_homo.T).T[:, :3]
                 map.add_points(points_world)
                 
                 # Clean up IMU buffer and skip EKF update
                 # imu_measurement_buffer = [m for m in imu_measurement_buffer if m[0] >= lidar_prev_scan_time]
-                return points_world, False, P_copy# Skips to the camera logic
+                return points_world, False, P_copy # Skips to the camera logic
+
+            # --- PRE-COMPUTE DATA ASSOCIATIONS ONCE ---
+            valid_associations = []
+            T_GI_init = np.eye(4)
+            T_GI_init[:3, :3] = state.R
+            T_GI_init[:3, 3] = state.p
+
+            for point_lidar in lidar_points_compensated:
+                # Transform each point from lidar frame to the world frame based on current pose
+                point = T_GI_init @ lidar_imu_extrinsic @ np.append(point_lidar, 1)
+                point_world_coords = point[:3]
+
+                #find the k nearest points from the global map and fit a plane
+                # 4. Fit a plane using SVD
+                neighbors = map.query(point_world_coords)
+                if neighbors is None or (len(neighbors) < 3):
+                    continue
+                if DEBUG_LIDAR:
+                    print("Number of neighbors for a point", len(neighbors))
+                
+                center = np.mean(neighbors, axis=0) 
+                centered_neighbors = neighbors - center
+                #find the normal to the plane based on the SVD
+                _, s, vh = np.linalg.svd(centered_neighbors)
+
+                if s[0] < 1e-6:
+                    continue  # degenerate, no structure
+                
+                ratio = s[1] / s[0]
+                if ratio > 0.3:
+                    normal = vh[-1, :]  # Plane normal vector
+                    valid_associations.append(('plane', point_lidar, center, normal))
+                    if DEBUG_LIDAR:
+                        print("Singular Values for plane:", s)
+                elif s[1] / s[0] < 0.15:  # optional stricter check, or just an else
+                    # Edge/line feature: store direction to calculate dynamic residual later
+                    direction = vh[0, :]  # principal direction of the line
+                    valid_associations.append(('line', point_lidar, center, direction))
+                else:
+                    continue  # ambiguous, skip
 
             kalman_gain = None
             H = None
             max_iterations = 10
+            
+            # --- ITERATED EKF UPDATE ---
             for iter_count in range(max_iterations):
-                points_world = []
                 H_list = []
                 residuals = []
                 T_GI[:3, :3] = state.R
                 T_GI[:3, 3] = state.p
 
-                for point_lidar in lidar_points_compensated:
-
-                    # Transform each point from lidar frame to the world frame based on current pose
+                for assoc_type, point_lidar, center, geom_vec in valid_associations:
+                    # Transform each point using the continually updated state
                     point = T_GI @ lidar_imu_extrinsic @ np.append(point_lidar, 1)
-                    points_world.append(point[:3])  # Extract the 3D coordinates
-                    point = point[:3]
+                    point_coords = point[:3]
 
-                    #find the k nearest points from the global map and fit a plane
-                    # 4. Fit a plane using SVD
-                    neighbors = map.query(point)
-                    if neighbors is None or (len(neighbors) < 3):
-                        continue
-                    if DEBUG_LIDAR:
-                        print("Number of neighbors for a point", len(neighbors))
-                    center = np.mean(neighbors, axis=0) 
-                    centered_neighbors = neighbors - center
-                    #find the normal to the plane based on the SVD
-                    _, s, vh = np.linalg.svd(centered_neighbors)
-
-                    if s[0] < 1e-6:
-                        continue  # degenerate, no structure
-                    ratio = s[1] / s[0]
-                    if ratio > 0.3:
-                        normal = vh[-1, :]  # Plane normal vector
-                        if DEBUG_LIDAR:
-                            print("Singular Values for plane:", s)
-                        #find the residual based on the normal and the center point
-                        vec = point - center
+                    #find the residual based on the normal and the center point
+                    vec = point_coords - center
+                    
+                    if assoc_type == 'plane':
+                        normal = geom_vec
                         res = float(np.dot(normal, vec))
-                    elif s[1] / s[0] < 0.15:  # optional stricter check, or just an else
+                    else:
                         # Edge/line feature: point-to-line residual instead of discarding
-                        direction = vh[0, :]  # principal direction of the line
-                        vec = point - center
+                        direction = geom_vec
                         perp = vec - np.dot(vec, direction) * direction  # component perpendicular to the line
                         res = float(np.linalg.norm(perp))
                         normal = perp / (res + 1e-9)  # "normal" here is the residual direction for the Jacobian
-                    else:
-                        continue  # ambiguous, skip
+
                     #reject large residuals
                     if abs(res) > 0.20:
                         continue
                     if DEBUG_LIDAR:
                         print("Plane residual:", res)
+                        
                     residuals.append(res)
                     #lidar jacobian computation
                     H_pos = normal.T
@@ -220,11 +238,7 @@ class ESIKFStateEstimator:
                 if DEBUG_LIDAR:
                     print("Residual norm", np.linalg.norm(r))
 
-                # error_pred = self.P @ H.T
                 sigma_lidar = 0.02
-                # lidar_sensor_noise = sigma_lidar**2 * np.eye(len(r)) #error in the lidar measurement
-                # error_meas = H @ cov @ H.T + lidar_sensor_noise
-                # kalman_gain = error_pred @ np.linalg.inv(error_meas) #calculating the Kalman Gain
 
                 R_inv = (1.0 / sigma_lidar**2) * np.eye(len(r)) 
                 P_inv = np.linalg.inv(P_copy)
@@ -251,6 +265,12 @@ class ESIKFStateEstimator:
                 P_new = (I - kalman_gain @ H) @ P_copy #covariance update
                 self.last_lidar_update_applied = True
 
-            return points_world, self.last_lidar_update_applied, P_new
+            # Generate final world points for the map using the converged state
+            T_GI[:3, :3] = state.R
+            T_GI[:3, 3] = state.p
+            lidar_homo = np.hstack([lidar_points_compensated, np.ones((len(lidar_points_compensated), 1))])
+            points_world_final = (T_GI @ lidar_imu_extrinsic @ lidar_homo.T).T[:, :3]
 
-        return None, False
+            return points_world_final, self.last_lidar_update_applied, P_new
+
+        return None, False, P_copy
