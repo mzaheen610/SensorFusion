@@ -135,6 +135,7 @@ class Lidar:
         self.lidar = RPLidar(self.port, baudrate=256000, timeout=3)
         self.lidar.get_health = lambda: ('Good', 0)
         self.lidar.connect()
+        self.lidar.stop_motor()
         self.lidar.start_motor()
         time.sleep(spinup_delay)
         self.lidar.clean_input()
@@ -176,11 +177,18 @@ class Lidar:
                 
                 # Check for parsing desyncs (dropped bytes)
                 if any(x in error_msg for x in ["Check bit", "descriptor", "mismatch"]):
-                    # Soft reset: flush buffer and recreate generator, keep motor spinning
+                    # 1. Pause the data stream (motor stays running)
+                    try:
+                        self.lidar.stop()
+                    except Exception:
+                        pass 
+                    # 2. Allow OS serial buffer to catch up, then flush
+                    time.sleep(0.05) 
                     self.lidar.clean_input()
+                    # 3. Restart the scan generator
                     self._scans = self.lidar.iter_scans(max_buf_meas=12000)
-                    continue # Retry immediately without punishing the attempt counter
-
+                    time.sleep(0.05) # Brief pause before next read
+                    continue
                 # Hard reset for actual hardware disconnects
                 attempts += 1
                 try:
