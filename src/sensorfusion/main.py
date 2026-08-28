@@ -121,8 +121,8 @@ if __name__ == "__main__":
     
     lidar_prev_scan_time = {"time": time.time()}
 
-    # imu_worker = Thread(target=imu_thread, args=(imu, filter), daemon=True)
-    # imu_worker.start()
+    imu_worker = Thread(target=imu_thread, args=(imu, filter), daemon=True)
+    imu_worker.start()
 
     lidar_worker = Thread(
         target=lidar_thread,
@@ -168,7 +168,7 @@ if __name__ == "__main__":
 
 
         #Get the camera scan at 10Hz
-        # frame = cam.get_frame()
+        frame = cam.get_frame()
         
         # #find visual map points for the current frame based on current pose and current lidar scan
         # visual_map_points = map.query_visible_voxels(scan) #visible voxel query
