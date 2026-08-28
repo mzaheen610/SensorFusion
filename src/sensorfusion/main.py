@@ -1,15 +1,15 @@
 from forward import ESIKFStateEstimator
-from initialize import Lidar, IMU, CameraSensor
+from initialize import IMU, CameraSensor
 import numpy as np
 import time
 from lidar.backward import backprop
-from lidar.update import lidar_acquisition_thread, lidar_thread
+from lidar.update import lidar_acquisition_process, lidar_thread
 from map import Map
 from utils.so3_rotation import skew, exp
 from utils.projections import project_points_to_frame, project_points_world
 from threading import Thread,Lock
+from multiprocessing import Process, Queue
 from collections import deque
-from queue import Queue
 import copy
 
 state_lock = Lock()
@@ -81,7 +81,6 @@ def imu_thread(imu, filter_ref):
 if __name__ == "__main__":
     filter = ESIKFStateEstimator()
     imu = IMU()
-    lidar = Lidar()
     cam = CameraSensor()
     map = Map()
     time.sleep(1.0)   # Let BNO055 finish initializing
@@ -125,15 +124,15 @@ if __name__ == "__main__":
     # data to backlog; the acquisition worker always retains the latest scan.
     lidar_scan_queue = Queue(maxsize=1)
 
-    imu_worker = Thread(target=imu_thread, args=(imu, filter), daemon=True)
-    imu_worker.start()
-
-    lidar_acquisition_worker = Thread(
-        target=lidar_acquisition_thread,
-        args=(lidar, lidar_scan_queue),
+    lidar_acquisition_worker = Process(
+        target=lidar_acquisition_process,
+        args=("/dev/ttyUSB0", lidar_scan_queue),
         daemon=True,
     )
     lidar_acquisition_worker.start()
+
+    imu_worker = Thread(target=imu_thread, args=(imu, filter), daemon=True)
+    imu_worker.start()
 
     lidar_worker = Thread(
         target=lidar_thread,

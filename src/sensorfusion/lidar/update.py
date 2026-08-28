@@ -33,6 +33,14 @@ def lidar_acquisition_thread(lidar, scan_queue):
             scan_queue.put_nowait(scan)
 
 
+def lidar_acquisition_process(port, scan_queue):
+    """Own the serial device in a separate process from fusion work."""
+    from initialize import Lidar
+
+    lidar = Lidar(port)
+    lidar_acquisition_thread(lidar, scan_queue)
+
+
 def lidar_thread(state_lock, buffer_lock, filter, map, imu_measurement_buffer,
                  lidar_prev_scan_time, scan_queue):
     """
