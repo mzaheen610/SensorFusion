@@ -27,18 +27,32 @@ def lidar_acquisition_thread(lidar, scan_queue):
             scan_queue.put_nowait(scan)
         except Full:
             try:
-                scan_queue.get_nowait()
+                # multiprocessing.Queue uses a feeder thread, so an item may
+                # already reserve the one slot before it is readable here.
+                scan_queue.get(timeout=0.1)
             except Empty:
+                continue
+            try:
+                scan_queue.put_nowait(scan)
+            except Full:
                 pass
-            scan_queue.put_nowait(scan)
 
 
 def lidar_acquisition_process(port, scan_queue):
     """Own the serial device in a separate process from fusion work."""
-    from initialize import Lidar
+    print("LiDAR acquisition process starting.", flush=True)
+    try:
+        from initialize import Lidar
 
-    lidar = Lidar(port)
-    lidar_acquisition_thread(lidar, scan_queue)
+        lidar = Lidar(port)
+        print("LiDAR acquisition process connected.", flush=True)
+        lidar_acquisition_thread(lidar, scan_queue)
+    except Exception as error:
+        print(
+            f"LiDAR acquisition process stopped: "
+            f"{type(error).__name__}: {error}",
+            flush=True,
+        )
 
 
 def lidar_thread(state_lock, buffer_lock, filter, map, imu_measurement_buffer,
