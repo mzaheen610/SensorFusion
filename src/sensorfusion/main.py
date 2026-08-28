@@ -3,12 +3,13 @@ from initialize import Lidar, IMU, CameraSensor
 import numpy as np
 import time
 from lidar.backward import backprop
-from lidar.update import lidar_thread
+from lidar.update import lidar_acquisition_thread, lidar_thread
 from map import Map
 from utils.so3_rotation import skew, exp
 from utils.projections import project_points_to_frame, project_points_world
 from threading import Thread,Lock
 from collections import deque
+from queue import Queue
 import copy
 
 state_lock = Lock()
@@ -120,13 +121,24 @@ if __name__ == "__main__":
     print("Mean stationary residual:", np.mean(residuals, axis=0))
     
     lidar_prev_scan_time = {"time": time.time()}
+    # A single-slot queue prevents slow scan processing from allowing serial
+    # data to backlog; the acquisition worker always retains the latest scan.
+    lidar_scan_queue = Queue(maxsize=1)
 
     imu_worker = Thread(target=imu_thread, args=(imu, filter), daemon=True)
     imu_worker.start()
 
+    lidar_acquisition_worker = Thread(
+        target=lidar_acquisition_thread,
+        args=(lidar, lidar_scan_queue),
+        daemon=True,
+    )
+    lidar_acquisition_worker.start()
+
     lidar_worker = Thread(
         target=lidar_thread,
-        args=(state_lock, buffer_lock, filter, lidar, map, imu_measurement_buffer, lidar_prev_scan_time),
+        args=(state_lock, buffer_lock, filter, map, imu_measurement_buffer,
+              lidar_prev_scan_time, lidar_scan_queue),
         daemon=True,
     )
     lidar_worker.start()

@@ -4,13 +4,37 @@ Implementation of the Lidar thread helper
 import copy
 import time
 import numpy as np
+from queue import Empty, Full
 from lidar.backward import backprop
 
 # Set to True when inspecting individual scans. Keep False during normal runs
 # because console I/O can noticeably reduce throughput on a Raspberry Pi.
 DEBUG_LIDAR = False
 
-def lidar_thread(state_lock, buffer_lock, filter, lidar, map, imu_measurement_buffer, lidar_prev_scan_time):
+
+#Moved the lidar scan acquisition to a seperate thread to limit lidar scan flag mismatch
+def lidar_acquisition_thread(lidar, scan_queue):
+    """Continuously drain the LiDAR serial stream into a latest-scan queue."""
+    while True:
+        scan = lidar.get_readings()
+        if scan is None:
+            time.sleep(0.01)
+            continue
+
+        # Processing must never make the serial reader wait.  Retain only the
+        # most recent complete scan when the fusion update falls behind.
+        try:
+            scan_queue.put_nowait(scan)
+        except Full:
+            try:
+                scan_queue.get_nowait()
+            except Empty:
+                pass
+            scan_queue.put_nowait(scan)
+
+
+def lidar_thread(state_lock, buffer_lock, filter, map, imu_measurement_buffer,
+                 lidar_prev_scan_time, scan_queue):
     """
     Backward propogation
     """
@@ -19,10 +43,7 @@ def lidar_thread(state_lock, buffer_lock, filter, lidar, map, imu_measurement_bu
     rate_started = time.monotonic()
     rate_last_report = rate_started
     while True:
-        scan = lidar.get_readings()
-        if scan is None:
-            time.sleep(0.01)
-            continue
+        scan = scan_queue.get()
 
         with state_lock:
             state = copy.deepcopy(filter.state)
@@ -64,7 +85,7 @@ def lidar_thread(state_lock, buffer_lock, filter, lidar, map, imu_measurement_bu
                 filter.state.g = state.g
             if points_world is not None:
                 map.add_points(points_world)
-
+        #DEBUG THE LIDAR SCAN AND EKF UPDATE RATE  
         report_time = time.monotonic()
         if report_time - rate_last_report >= 1.0:
             elapsed = report_time - rate_started
@@ -77,7 +98,7 @@ def lidar_thread(state_lock, buffer_lock, filter, lidar, map, imu_measurement_bu
                     f"{filter.last_lidar_residual_count}"
                 )
             rate_last_report = report_time
-
+        #clear the imu buffer after the current batch is processed
         with buffer_lock:
             imu_measurement_buffer.clear()
             imu_measurement_buffer.extend(
