@@ -85,7 +85,7 @@ class ESIKFStateEstimator:
         self.P = A @ self.P @ A.T + self.Q
         return self.state, self.P
 
-    def lidar_update(self, scan, state, lidar_points_compensated, map):
+    def lidar_update(self, scan, state, P_copy, lidar_points_compensated, map):
         """
         LiDAR based update.
         When the LiDAR scan is motion compensated, do the residual computation 
@@ -121,7 +121,7 @@ class ESIKFStateEstimator:
                 map.add_points(points_world)
                 if DEBUG_LIDAR:
                     print("Not enough points in the map")
-                return None, False
+                return None, False, P_copy
 
             if map.is_empty():
                 points_world = []
@@ -135,7 +135,7 @@ class ESIKFStateEstimator:
                 
                 # Clean up IMU buffer and skip EKF update
                 # imu_measurement_buffer = [m for m in imu_measurement_buffer if m[0] >= lidar_prev_scan_time]
-                return points_world, False # Skips to the camera logic
+                return points_world, False, P_copy# Skips to the camera logic
 
             kalman_gain = None
             H = None
@@ -227,7 +227,7 @@ class ESIKFStateEstimator:
                 # kalman_gain = error_pred @ np.linalg.inv(error_meas) #calculating the Kalman Gain
 
                 R_inv = (1.0 / sigma_lidar**2) * np.eye(len(r)) 
-                P_inv = np.linalg.inv(self.P)
+                P_inv = np.linalg.inv(P_copy)
                 kalman_gain = np.linalg.inv(H.T @ R_inv @ H + P_inv) @ (H.T @ R_inv)
 
                 dx = kalman_gain @ r #error-state vector
@@ -247,10 +247,10 @@ class ESIKFStateEstimator:
 
             #Prevent crash when there is no LiDAR update
             if kalman_gain is not None and H is not None:
-                I = np.eye(self.P.shape[0])
-                self.P = (I - kalman_gain @ H) @ self.P #covariance update
+                I = np.eye(P_copy.shape[0])
+                P_new = (I - kalman_gain @ H) @ P_copy #covariance update
                 self.last_lidar_update_applied = True
 
-            return points_world, self.last_lidar_update_applied
+            return points_world, self.last_lidar_update_applied, P_new
 
         return None, False

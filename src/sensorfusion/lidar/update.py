@@ -82,6 +82,8 @@ def lidar_thread(state_lock, buffer_lock, filter, map, imu_measurement_buffer,
 
         with state_lock:
             state = copy.deepcopy(filter.state)
+            P_copy = copy.deepcopy(filter.P)
+
         # Keep the exact pre-update snapshot so only the correction delta can
         # be merged into the state that IMU prediction advances concurrently.
         state_old = copy.deepcopy(state)
@@ -100,8 +102,8 @@ def lidar_thread(state_lock, buffer_lock, filter, map, imu_measurement_buffer,
                 print("Compensated LiDAR points: ", lidar_points_compensated[i])
             print("Current position: ", state.p)
 
-        points_world, update_applied = filter.lidar_update(
-            scan, state, lidar_points_compensated, map
+        points_world, update_applied, P_new = filter.lidar_update(
+            scan, state, P_copy, lidar_points_compensated, map
         )
         with state_lock:
             scan_count += 1
@@ -118,6 +120,7 @@ def lidar_thread(state_lock, buffer_lock, filter, map, imu_measurement_buffer,
                 filter.state.bg = state.bg
                 filter.state.ba = state.ba
                 filter.state.g = state.g
+                filter.P = P_new
             if points_world is not None:
                 map.add_points(points_world)
         #DEBUG THE LIDAR SCAN AND EKF UPDATE RATE  
@@ -135,7 +138,6 @@ def lidar_thread(state_lock, buffer_lock, filter, map, imu_measurement_buffer,
             rate_last_report = report_time
         #clear the imu buffer after the current batch is processed
         with buffer_lock:
-            imu_measurement_buffer.clear()
-            imu_measurement_buffer.extend(
-                m for m in imu_buffer if m[0] >= lidar_prev_scan_time["time"]
-            )
+            # Cleanly discard old items without touching newly appended ones
+            while imu_measurement_buffer and imu_measurement_buffer[0][0] < lidar_prev_scan_time["time"]:
+                imu_measurement_buffer.popleft()
