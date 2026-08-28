@@ -15,11 +15,24 @@ DEBUG_LIDAR = False
 #Moved the lidar scan acquisition to a seperate thread to limit lidar scan flag mismatch
 def lidar_acquisition_thread(lidar, scan_queue):
     """Continuously drain the LiDAR serial stream into a latest-scan queue."""
+    scan_count = 0
+    last_report = time.monotonic()
     while True:
         scan = lidar.get_readings()
         if scan is None:
             # time.sleep(0.01)
             continue
+
+        scan_count += 1
+        now = time.monotonic()
+        if now - last_report >= 1.0:
+            print(
+                f"LiDAR acquisition rate: {scan_count / (now - last_report):.1f} "
+                f"Hz | points in latest scan: {len(scan)}",
+                flush=True,
+            )
+            scan_count = 0
+            last_report = now
 
         # Processing must never make the serial reader wait.  Retain only the
         # most recent complete scan when the fusion update falls behind.
