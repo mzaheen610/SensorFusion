@@ -83,6 +83,7 @@ if __name__ == "__main__":
     imu = IMU()
     cam = CameraSensor()
     map = Map()
+
     time.sleep(1.0)   # Let BNO055 finish initializing
     filter.state.R, filter.state.bg, filter.state.ba = imu.initialize_rotation_gyro()
     initial_covariance = 100 * np.eye(18)
@@ -103,27 +104,29 @@ if __name__ == "__main__":
     print("World accel corrected:", a_world_corrected)
     print("Linear world acceleration:", linear_accel_world)
 
+    """
+    Initial imu residual calculation
+    """
     residuals = []
-
     for _ in range(100):
         reading = imu.get_readings()
-
         if reading is not None:
             _, accel = reading
             residuals.append(
                 filter.state.R @ (accel - filter.state.ba)
                 - filter.state.g
             )
-
         time.sleep(0.01)
-
     print("Mean stationary residual:", np.mean(residuals, axis=0))
     
     lidar_prev_scan_time = {"time": time.time()}
     # A single-slot queue prevents slow scan processing from allowing serial
     # data to backlog; the acquisition worker always retains the latest scan.
-    lidar_scan_queue = Queue(maxsize=1)
+    lidar_scan_queue = Queue(maxsize=1) #queue to store the lidar scans
 
+    """
+    Start Lidar scan acquisition process
+    """
     lidar_acquisition_worker = Process(
         target=lidar_acquisition_process,
         args=("/dev/ttyUSB0", lidar_scan_queue),
@@ -131,9 +134,10 @@ if __name__ == "__main__":
     )
     lidar_acquisition_worker.start()
 
-    imu_worker = Thread(target=imu_thread, args=(imu, filter), daemon=True)
-    imu_worker.start()
 
+    """
+    Start the LiDAR processing and update thread
+    """
     lidar_worker = Thread(
         target=lidar_thread,
         args=(state_lock, buffer_lock, filter, map, imu_measurement_buffer,
@@ -141,6 +145,14 @@ if __name__ == "__main__":
         daemon=True,
     )
     lidar_worker.start()
+
+    time.sleep(10) #wait for the lidar process to initialize properly
+    
+    """
+    Starting the IMU thread - data acquisition and forward propogation
+    """
+    imu_worker = Thread(target=imu_thread, args=(imu, filter), daemon=True)
+    imu_worker.start()
 
     while(True):
         # now = time.time()
