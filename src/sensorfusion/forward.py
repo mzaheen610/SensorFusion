@@ -58,11 +58,11 @@ class ESIKFStateEstimator:
         A[3:6, 0:3] = -0.5 * x_prev.R @ a_skew * dt**2
         A[3:6, 6:9] = np.eye(3) * dt
         A[3:6, 12:15] = -0.5 * x_prev.R * dt**2
-        A[3:6, 15:18] = np.eye(3) * 0.5 * dt**2
+        A[3:6, 15:18] = -np.eye(3) * 0.5 * dt**2
 
         A[6:9, 0:3] = -x_prev.R @ a_skew * dt
         A[6:9, 12:15] = -x_prev.R * dt
-        A[6:9, 15:18] = np.eye(3) * dt
+        A[6:9, 15:18] = -np.eye(3) * dt
 
         return A
     
