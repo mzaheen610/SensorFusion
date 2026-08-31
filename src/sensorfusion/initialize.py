@@ -66,39 +66,50 @@ class IMU:
 
     def get_readings(self):
         gyro = self.sensor.gyro
-        accel = self.sensor.acceleration
-        if gyro is not None and accel is not None:
-            return np.array(gyro), np.array(accel)
+        # accel = self.sensor.acceleration
+        linear_accel = self.sensor.linear_acceleration
+        if gyro is not None and linear_accel is not None:
+            return np.array(gyro), np.array(linear_accel)
         time.sleep(0.001)
     
     def initialize_rotation_gyro(self):
+        """
+        Finding the initial rotation based on observed 
+        gravity and theoretical value.
+        Also estimate accelerometer bias from observations.
+        """
         #Find the initial rotation matrix from the IMU readings
         #Collect 5s of IMU data to get the mean acceleration
         self.wait_for_calibration()
+        time.sleep(5) #after calibration wait for the sensor to be placed static
         curr_time = time.time()
-        accel_data = []
+        # accel_data = []
         gyro_data = []
+        gravity_data = []
+        linear_accel_data = []
         
         while(time.time() - curr_time < 10):
-            accel = self.sensor.acceleration
+            # accel = self.sensor.acceleration
             gyro = self.sensor.gyro
-            print("acceleration:", self.sensor.acceleration)
-            print("gravity:", self.sensor.gravity)
-            print("linear_acceleration:", self.sensor.linear_acceleration)
+            gravity = self.sensor.gravity
+            linear_accel = self.sensor.linear_acceleration #accel with gravity removed onboard the sensor
             if _is_valid_reading(gyro):
                 gyro_data.append(gyro)
-            if _is_valid_reading(accel):
-                accel_data.append(accel)
+            if _is_valid_reading(linear_accel):
+                linear_accel_data.append(linear_accel)
+            if _is_valid_reading(gravity):
+                gravity_data.append(gravity)
             time.sleep(0.01) #sample at 100Hz or else it may read same value multiple times
 
-        if not gyro_data or not accel_data:
+        if not gyro_data or not gravity_data:
             return np.eye(3), np.zeros(3), np.zeros(3)
 
         #Estimate gyro bias
         bg = np.mean(gyro_data, axis=0)
 
-        a_mean = np.mean(accel_data, axis=0)
-        g_body = a_mean / np.linalg.norm(a_mean) #direction of gravity vector wrt IMU body
+        # a_mean = np.mean(accel_data, axis=0)
+        g_mean = np.mean(gravity_data, axis=0)
+        g_body = g_mean / np.linalg.norm(g_mean) #direction of gravity vector wrt IMU body
         g_world = np.array([0,0,-1])
         #Find the axis of rotation by taking cross product of the two vectors
         axis = np.cross(g_body, g_world)
@@ -108,16 +119,9 @@ class IMU:
         #Normalize the axis to get only the direction
         axis_norm = np.linalg.norm(axis)
 
-        #Find the accelerometer bias from BNO055's own hardware-fused accel offsets
-        # instead of deriving ba from a single static orientation (which is mathematically
-        # incapable of separating bias from tilt error).
-        try:
-            ba = np.array(self.sensor.offsets_accelerometer, dtype=float) / 100.0
-            # adafruit_bno055 reports offsets in mg; acceleration is in m/s^2,
-            # so convert: 1 LSB = 1 mg = 0.00980665 m/s^2.
-            ba = np.array(self.sensor.offsets_accelerometer, dtype=float) * 0.00980665
-        except Exception:
-            ba = np.zeros(3)  # fall back rather than silently using a bad estimate
+        #Estimate bias from the stationary linear accel data
+        ba = np.mean(linear_accel_data, axis=0) if linear_accel_data else np.zeros(3)
+        print("Residual linear_acceleration bias (should be small, e.g. <2):", ba)
 
         if axis_norm < 1e-8:
             return np.eye(3), bg, np.zeros(3)

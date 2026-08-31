@@ -86,6 +86,7 @@ if __name__ == "__main__":
 
     time.sleep(1.0)   # Let BNO055 finish initializing
     filter.state.R, filter.state.bg, filter.state.ba = imu.initialize_rotation_gyro()
+    filter.state.g = np.zeros(3)  #gravity is already removed by the chip's linear_acceleration output; don't subtract it again
     initial_covariance = 100 * np.eye(18)
 
     print("Initial R:")
@@ -147,7 +148,7 @@ if __name__ == "__main__":
     lidar_worker.start()
 
     time.sleep(10) #wait for the lidar process to initialize properly
-    
+
     """
     Starting the IMU thread - data acquisition and forward propogation
     """
