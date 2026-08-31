@@ -82,6 +82,9 @@ class IMU:
         while(time.time() - curr_time < 10):
             accel = self.sensor.acceleration
             gyro = self.sensor.gyro
+            print("acceleration:", self.sensor.acceleration)
+            print("gravity:", self.sensor.gravity)
+            print("linear_acceleration:", self.sensor.linear_acceleration)
             if _is_valid_reading(gyro):
                 gyro_data.append(gyro)
             if _is_valid_reading(accel):
