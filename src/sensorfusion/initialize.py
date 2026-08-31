@@ -74,7 +74,7 @@ class IMU:
     def initialize_rotation_gyro(self):
         #Find the initial rotation matrix from the IMU readings
         #Collect 5s of IMU data to get the mean acceleration
-        # self.wait_for_calibration()
+        self.wait_for_calibration()
         curr_time = time.time()
         accel_data = []
         gyro_data = []
@@ -104,6 +104,18 @@ class IMU:
 
         #Normalize the axis to get only the direction
         axis_norm = np.linalg.norm(axis)
+
+        #Find the accelerometer bias from BNO055's own hardware-fused accel offsets
+        # instead of deriving ba from a single static orientation (which is mathematically
+        # incapable of separating bias from tilt error).
+        try:
+            ba = np.array(self.sensor.offsets_accelerometer, dtype=float) / 100.0
+            # adafruit_bno055 reports offsets in mg; acceleration is in m/s^2,
+            # so convert: 1 LSB = 1 mg = 0.00980665 m/s^2.
+            ba = np.array(self.sensor.offsets_accelerometer, dtype=float) * 0.00980665
+        except Exception:
+            ba = np.zeros(3)  # fall back rather than silently using a bad estimate
+
         if axis_norm < 1e-8:
             return np.eye(3), bg, np.zeros(3)
         axis = axis / axis_norm
@@ -111,17 +123,17 @@ class IMU:
         #Finding the initial rotation after SO(3) transform
         R_theta = exp(delta_theta)
 
-        g_world_actual = np.array([0.0, 0.0, -9.81])
+        # g_world_actual = np.array([0.0, 0.0, -9.81])
         
-        # Calculate what gravity should look like in the body frame
-        expected_g_body = R_theta.T @ g_world_actual
+        # # Calculate what gravity should look like in the body frame
+        # expected_g_body = R_theta.T @ g_world_actual
 
-        aligned_gravity = R_theta @ g_body
+        # aligned_gravity = R_theta @ g_body
 
-        print("Aligned gravity:", aligned_gravity)
+        # print("Aligned gravity:", aligned_gravity)
 
-        #Estimate the bias
-        ba = a_mean- expected_g_body
+        # #Estimate the bias
+        # ba = a_mean- expected_g_body
 
         return R_theta, bg, ba
     
