@@ -176,7 +176,8 @@ class ESIKFStateEstimator:
             kalman_gain = None
             H = None
             max_iterations = 10
-            
+            P_inv = np.linalg.inv(P_copy)
+
             # --- ITERATED EKF UPDATE ---
             for iter_count in range(max_iterations):
                 H_list = []
@@ -241,7 +242,6 @@ class ESIKFStateEstimator:
                 sigma_lidar = 0.02
 
                 R_inv = (1.0 / sigma_lidar**2) * np.eye(len(r)) 
-                P_inv = np.linalg.inv(P_copy)
                 kalman_gain = np.linalg.inv(H.T @ R_inv @ H + P_inv) @ (H.T @ R_inv)
 
                 dx = kalman_gain @ r #error-state vector

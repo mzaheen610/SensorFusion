@@ -67,7 +67,8 @@ class Map:
             current_points = voxel["lidar"]
 
         if len(current_points) >= min_points_in_voxel:
-            return np.array(current_points)
+            pts = current_points[:min_points_in_voxel * 2] #limit the number of points
+            return np.array(pts)
 
         neighbors = list(current_points)
         for dx in range(-radius_voxels, radius_voxels + 1):
@@ -79,7 +80,8 @@ class Map:
                     nvoxel = self.voxel_map.get(nkey, None)
                     if nvoxel is not None and nvoxel["lidar"]:
                         neighbors.extend(nvoxel["lidar"])
-
+                        if len(neighbors) >= min_points_in_voxel * 2:
+                            break  #stop early once we have enough points
         if len(neighbors) == 0:
             return None
 
