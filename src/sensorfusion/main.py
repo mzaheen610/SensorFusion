@@ -11,7 +11,7 @@ from threading import Thread,Lock
 from multiprocessing import Process, Queue
 from collections import deque
 import copy
-from utils.visualize import visualize
+from utils.map_stream import tcp_stream_thread
 
 state_lock = Lock()
 buffer_lock = Lock()
@@ -156,9 +156,9 @@ if __name__ == "__main__":
     imu_worker = Thread(target=imu_thread, args=(imu, filter), daemon=True)
     imu_worker.start()
 
-    visual_thread = Thread(target=visualize, args=(map), daemon=True)
-    visual_thread.start()
-    
+    stream_thread = Thread(target=tcp_stream_thread, args=(map, filter, state_lock), daemon=True)
+    stream_thread.start()
+
     while(True):
         # now = time.time()
         # dt = now - prev
