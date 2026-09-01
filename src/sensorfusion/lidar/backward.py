@@ -18,8 +18,8 @@ def compute_prev_pose(current_state, delta_time, gyro, accel):
 
     delta_theta = ang_act * delta_time
     delta_R = exp(delta_theta)
-    x_prev.R = x_prev.R @ delta_R  #del_theta = w*del_t --> converted to proper SO(3) before adding to the rotation matrix(SO(3))
-    x_prev.p -= (x_prev.v * delta_time)
+    x_prev.R = x_prev.R @ delta_R.T  #del_theta = w*del_t --> converted to proper SO(3) before adding to the rotation matrix(SO(3))
+    x_prev.p -= (x_prev.v * delta_time) - (0.5 * accel * delta_time**2)
     x_prev.v -= accel * delta_time
 
     #Covariance update
@@ -56,6 +56,8 @@ def backprop(scan_end_time, prev_scan_time, imu_pose, scan, imu_measurement_buff
                 pose_j = compute_prev_pose(pose_j, dt, gyro, accel)
                 break
             dt = current_time - imu_time
+            if dt <= 0.0 or dt > 0.1:
+                break
             pose_j = compute_prev_pose(pose_j, dt, gyro, accel)
             current_time = imu_time
         #Transform the point to the scan end time frame using the pose_j
