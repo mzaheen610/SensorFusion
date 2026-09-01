@@ -11,6 +11,7 @@ from threading import Thread,Lock
 from multiprocessing import Process, Queue
 from collections import deque
 import copy
+from utils.visualize import visualize
 
 state_lock = Lock()
 buffer_lock = Lock()
@@ -155,6 +156,9 @@ if __name__ == "__main__":
     imu_worker = Thread(target=imu_thread, args=(imu, filter), daemon=True)
     imu_worker.start()
 
+    visual_thread = Thread(target=visualize, args=(map), daemon=True)
+    visual_thread.start()
+    
     while(True):
         # now = time.time()
         # dt = now - prev

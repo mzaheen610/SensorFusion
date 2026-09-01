@@ -10,3 +10,4 @@ rplidar-roboticia
 adafruit-blinka 
 smbus2
 picamzero
+open3d
