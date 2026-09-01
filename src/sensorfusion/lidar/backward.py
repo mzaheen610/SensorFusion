@@ -43,6 +43,7 @@ def backprop(scan_end_time, prev_scan_time, imu_pose, scan, imu_measurement_buff
         delta_time = scan_end_time - (prev_scan_time + point_time)
         pose_j = deepcopy(imu_pose)
         current_time = scan_end_time
+        valid_point = False
         # print("Scan end time: ", scan_end_time)
         # print("Prev scan time: ", prev_scan_time)
         # print("Point time: ", point_time)
@@ -54,12 +55,16 @@ def backprop(scan_end_time, prev_scan_time, imu_pose, scan, imu_measurement_buff
             if imu_time <= point_abs_time:
                 dt = current_time - point_abs_time
                 pose_j = compute_prev_pose(pose_j, dt, gyro, accel)
+                valid_point = True
                 break
             dt = current_time - imu_time
             if dt <= 0.0 or dt > 0.1:
                 break
             pose_j = compute_prev_pose(pose_j, dt, gyro, accel)
             current_time = imu_time
+
+        if not valid_point:
+            continue
         #Transform the point to the scan end time frame using the pose_j
         angle = np.deg2rad(point[1])
         distance = point[2] / 1000.0 #convert mm to meters
