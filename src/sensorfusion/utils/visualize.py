@@ -18,15 +18,23 @@ def receive_stream(robot_ip="10.12.228.214", port=5000):
     # Create Open3D visualizer ONCE
     # -----------------------------------------
     visualizer = o3d.visualization.Visualizer()
-    visualizer.create_window(window_name="SLAM Map", width=1280, height=720)
+
+    visualizer.create_window(
+        window_name="SLAM Map",
+        width=1280,
+        height=720
+    )
+
     pcd = o3d.geometry.PointCloud()
     visualizer.add_geometry(pcd)
+
     first_frame = True
+
     try:
         while True:
-            # =====================================
-            # Receive message length
-            # =====================================
+            # -----------------------------
+            # Receive message size
+            # -----------------------------
             while len(data_buffer) < payload_size:
                 packet = client.recv(4096)
                 if not packet:
@@ -35,10 +43,13 @@ def receive_stream(robot_ip="10.12.228.214", port=5000):
                 data_buffer += packet
             packed_msg_size = data_buffer[:payload_size]
             data_buffer = data_buffer[payload_size:]
-            msg_size = struct.unpack(">I", packed_msg_size)[0]
-            # =====================================
-            # Receive payload
-            # =====================================
+            msg_size = struct.unpack(
+                ">I",
+                packed_msg_size
+            )[0]
+            # -----------------------------
+            # Receive message
+            # -----------------------------
             while len(data_buffer) < msg_size:
                 packet = client.recv(4096)
                 if not packet:
@@ -47,30 +58,48 @@ def receive_stream(robot_ip="10.12.228.214", port=5000):
                 data_buffer += packet
             frame_data = data_buffer[:msg_size]
             data_buffer = data_buffer[msg_size:]
-            # =====================================
+            # -----------------------------
             # Deserialize
-            # =====================================
+            # -----------------------------
             payload = pickle.loads(frame_data)
             map_points = payload["map_points"]
-            voxel_size = payload["voxel_size"]
-            # =====================================
-            # Convert map to numpy
-            # =====================================
-            if len(map_points) > 0:
-                points = np.asarray(map_points, dtype=np.float64)
-                # If list contains multiple arrays
-                if points.ndim > 2:
-                    points = np.vstack(points)
-                # Make sure we have Nx3
-                if points.ndim == 2 and points.shape[1] == 3:
-                    pcd.points = o3d.utility.Vector3dVector(points)
-                    visualizer.update_geometry(pcd)
-            # =====================================
-            # Update Open3D
-            # =====================================
+            points = np.asarray(
+                map_points,
+                dtype=np.float64
+            )
+            # -----------------------------
+            # Check point cloud
+            # -----------------------------
+            if points.size == 0:
+                print("No points received")
+                continue
+            if points.ndim > 2:
+                points = np.vstack(points)
+            if points.ndim != 2 or points.shape[1] != 3:
+                print("Invalid point shape:", points.shape)
+                continue
+
+            print("\nNumber of points:", points.shape[0])
+            print("Minimum:", points.min(axis=0))
+            print("Maximum:", points.max(axis=0))
+            print("Mean:", points.mean(axis=0))
+            print("First 10 points:")
+            print(points[:10])
+
+            # -----------------------------
+            # Update point cloud
+            # -----------------------------
+            pcd.points = o3d.utility.Vector3dVector(points)
+            visualizer.update_geometry(pcd)
+            # -----------------------------
+            # Set camera on first frame
+            # -----------------------------
+            if first_frame:
+                visualizer.reset_view_point(True)
+                first_frame = False
+
             visualizer.poll_events()
             visualizer.update_renderer()
-            print(f"\rPoints: {len(map_points)} " f"| Voxel size: {voxel_size}", end="")
     except KeyboardInterrupt:
         print("\nStopping stream.")
     except Exception as e:
