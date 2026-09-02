@@ -155,8 +155,8 @@ if __name__ == "__main__":
     imu_worker = Thread(target=imu_thread, args=(imu, filter), daemon=True)
     imu_worker.start()
 
-    stream_thread = Thread(target=tcp_stream_thread, args=(map, filter, state_lock), daemon=True)
-    stream_thread.start()
+    # stream_thread = Thread(target=tcp_stream_thread, args=(map, filter, state_lock), daemon=True)
+    # stream_thread.start()
 
     prev_time = time.time()
 
