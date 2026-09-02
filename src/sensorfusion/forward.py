@@ -204,7 +204,7 @@ class ESIKFStateEstimator:
                         normal = perp / (res + 1e-9)  # "normal" here is the residual direction for the Jacobian
 
                     #reject large residuals
-                    if abs(res) > 0.20:
+                    if abs(res) > 0.80:
                         continue
                     if DEBUG_LIDAR:
                         print("Plane residual:", res)

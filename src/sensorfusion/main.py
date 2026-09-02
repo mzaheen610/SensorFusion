@@ -160,46 +160,12 @@ if __name__ == "__main__":
     stream_thread.start()
 
     while(True):
-        # now = time.time()
-        # dt = now - prev
-        # prev = now
-        # print("IMU prdiction frequency:", (1/dt))
 
-        # """
-        # Forward propogation
-        # """
-        # # imu_data = imu.get_readings()
-        # # imu_measurement_buffer.append((now, imu_data[0], imu_data[1])) #store the timestamp and imu readings for backpropogation of LiDAR points
-        # # print("gyro: ", imu_data[0])
-        # # print("accel: ", imu_data[1])
-        # #After getting the IMU readings, we perform the forward propagation of the state using the ESIKF filter
-
-        # state, cov = filter.predict(imu_data, dt)
-
-        # imu_state = (now, state) #store the timestamp and state for backpropogation of LiDAR points
-        # imu_state_buffer.append(imu_state)
-
-        # """
-        # Backward propogation
-        # """
-        # #After forward propogation the LiDAR points are backpropogated when the scan arrives
-        # scan = lidar.get_readings()
-        # if scan is not None:
-        #     now = time.time()
-        #     lidar_points_compensated = backprop(now, lidar_prev_scan_time, state, scan, imu_measurement_buffer)
-        #     lidar_prev_scan_time = now
-        #     for i in range(5):
-        #         print("Original LiDAR points: ", scan[i])
-        #     for i in range(5):
-        #         print("Compensated LiDAR points: ", lidar_points_compensated[i])
-        #     print("Current position: ", state.p)
-
-
-        #Get the camera scan at 10Hz
-        frame = cam.get_frame()
+        # #Get the camera scan at 10Hz
+        # frame = cam.get_frame()
         
         # #find visual map points for the current frame based on current pose and current lidar scan
-        # visual_map_points = map.query_visible_voxels(scan) #visible voxel query
+        # visual_map_points = map.query_visible_voxels(lidar_scan_queue, sta) #visible voxel query
 
         # #project lidar points to the current camera frame (u,v)
         # R_CI = np.eye(3) 
@@ -214,6 +180,38 @@ if __name__ == "__main__":
         # #attach the patch to the lidar map point
 
         # print(frame)
+        with state_lock:
+            state = filter.state
+            print("Current state (x,y,z): ", state.p)
+
+def camera_thread(cam, state_lock, filter, map, imu_measurement_buffer, lidar_scan_queue):
+        #Get the camera scan at 10Hz
+        frame = cam.get_frame()
+        
+        #find visual map points for the current image frame based on current pose and current lidar scan
+        visual_map_points = map.query_visible_voxels(lidar_scan_queue, filter.state) #visible voxel query
+
+        #project lidar points to the current camera frame (u,v)
+        R_CI = np.eye(3) 
+        t_CI = np.eye(3)
+
+        T_CI = np.eye(4) #dummy camera imu extrinsics, real values have to be calibrated later
+        T_CI[:3, :3] = R_CI
+        T_CI[:3, 3] = t_CI
+
+        projected_points_pixels = project_points_to_frame(visual_map_points, T_GI, T_CI)
+        #get the 8x8 pixel patch surrounding the current lidar point
+        for point in projected_points_pixels:
+            #get the 8x8 patch surrounding the pixel
+            pixel = point[1]
+            u = pixel[0]
+            v = pixel[1]
+            patch = frame[u-4:u+4, v-4:v+4]
+            #get the voxel for the current lidar point
+            #attach the patch to the lidar map point
+            map.add_visual_patch(point, patch)
+
+        print(frame)
         with state_lock:
             state = filter.state
             print("Current state (x,y,z): ", state.p)

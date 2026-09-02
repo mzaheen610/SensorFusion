@@ -91,10 +91,36 @@ class Map:
         #get the root voxel key since the voxel is 0.5x0.5x0.5 cube and multiple points could belong to the same voxel
         return tuple(np.floor(point/self.voxel_size))
     
-    def query_visible_voxels(self, points):
+    def query_visible_voxels(self, lidar_scan_queue, state):
         #find the voxels in the map nearest to the measured points
+        #filter based on the camera field of view projected into the lidar FOV
+        current_scan = lidar_scan_queue[-1]
+        #points should be backpropogated and transformed to the world coordinates
+        #search for points within the Camera x Lidar FOV limits
+        lidar_range = 12
+        theta = np.deg2rad(31) #half of camera horizontal range
+        alpha = np.deg2rad(24) #half of camera vertical range
+
+        rcos_theta = lidar_range* np.cos(theta)
+        rsin_theta = lidar_range* np.sin(theta)
+
+        rcos_alpha = lidar_range* np.cos(alpha)
+        rsin_alpha = lidar_range* np.sin(alpha)
+
+        current_pose = state.p
+        x = current_pose[0]
+        y = current_pose[1]
+        z = current_pose[2]
+
+        visible_points = []
+        for point in current_scan:
+            if point[0] < x + rsin_theta and point[0] > x - rsin_theta:
+                if point[1] < y + rcos_alpha and y - point[1] > 0:
+                    if point[2] < z + rsin_alpha and point[1] > z - rsin_alpha:
+                        visible_points.append(point)
+
         visual_map_points = []
-        for point in points:
+        for point in visible_points:
             voxel_points = self.query(point)
             visual_map_points.append(voxel_points)
         return visual_map_points
