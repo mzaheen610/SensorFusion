@@ -159,6 +159,8 @@ if __name__ == "__main__":
     stream_thread = Thread(target=tcp_stream_thread, args=(map, filter, state_lock), daemon=True)
     stream_thread.start()
 
+    prev_time = time.time()
+
     while(True):
 
         # #Get the camera scan at 10Hz
@@ -180,9 +182,12 @@ if __name__ == "__main__":
         # #attach the patch to the lidar map point
 
         # print(frame)
-        with state_lock:
-            state = filter.state
-            print("Current state (x,y,z): ", state.p)
+        now = time.time()
+        if now - prev_time >= 1:
+            prev_time = now
+            with state_lock:
+                state = filter.state
+                print("Current state (x,y,z): ", state.p)
 
 def camera_thread(cam, state_lock, filter, map, imu_measurement_buffer, lidar_scan_queue):
         #Get the camera scan at 10Hz
