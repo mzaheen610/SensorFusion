@@ -75,10 +75,10 @@ def imu_thread(imu, filter_ref):
             rate = prediction_count / elapsed if elapsed > 0 else 0.0
             # This value is the acceleration driving the integration.  At rest it
             # should be close to zero on every axis; otherwise position must drift.
-            linear_accel = filter_ref.state.R @ (accel - filter_ref.state.ba) - filter_ref.state.g
+            # linear_accel = filter_ref.state.R @ (accel - filter_ref.state.ba) - filter_ref.state.g
             print(
                 f"IMU prediction rate: {rate:.1f} Hz | dt: {dt * 1000:.2f} ms | "
-                f"linear accel: {linear_accel} | |v|: {np.linalg.norm(state.v):.3f}"
+                # f"linear accel: {linear_accel} | |v|: {np.linalg.norm(state.v):.3f}"
             )
             rate_last_report = report_time
 
