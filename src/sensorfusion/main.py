@@ -21,20 +21,20 @@ filter = ESIKFStateEstimator()
 
 def imu_thread(imu, filter_ref):
     prev_time = None
-    prediction_count = 0
-    invalid_reading_count = 0
+    # prediction_count = 0
+    # invalid_reading_count = 0
     rate_started = time.monotonic()
-    rate_last_report = rate_started
+    # rate_last_report = rate_started
     while True:
         imu_data = imu.get_readings()
         now = time.time()
         #Reject none values and validate the readings 
         if imu_data is None:
-            invalid_reading_count += 1
+            # invalid_reading_count += 1
             continue
         gyro, accel = imu_data
         if gyro is None or accel is None:
-            invalid_reading_count += 1
+            # invalid_reading_count += 1
             continue
 
         gyro = np.asarray(gyro, dtype=float)
@@ -44,7 +44,7 @@ def imu_thread(imu, filter_ref):
             or not np.all(np.isfinite(gyro))
             or not np.all(np.isfinite(accel))
             ):
-            invalid_reading_count += 1
+            # invalid_reading_count += 1
             continue
 
         with buffer_lock:
@@ -63,35 +63,35 @@ def imu_thread(imu, filter_ref):
             prev_time = now
             continue
         prev_time = now
-        if prediction_count % 25 == 0:
-            print(
-                "raw accel:", accel,
-                "ba:", filter_ref.state.ba,
-                "corrected body:", accel - filter_ref.state.ba,
-            )
+        # if prediction_count % 25 == 0:
+        #     print(
+        #         "raw accel:", accel,
+        #         "ba:", filter_ref.state.ba,
+        #         "corrected body:", accel - filter_ref.state.ba,
+        #     )
         with state_lock:
             state, cov = filter_ref.predict((gyro, accel), dt)
             imu_state = (now, copy.deepcopy(state)) #store the timestamp and state for backpropogation of LiDAR points
             imu_state_buffer.append(imu_state)
 
-        prediction_count += 1
-        report_time = time.monotonic()
-        if report_time - rate_last_report >= 1.0:
-            elapsed = report_time - rate_started
-            rate = prediction_count / elapsed if elapsed > 0 else 0.0
-            # This value is the acceleration driving the integration.  At rest it
-            # should be close to zero on every axis; otherwise position must drift.
-            linear_accel = filter_ref.state.R @ (accel - filter_ref.state.ba) - filter_ref.state.g
-            print(
-                f"IMU prediction rate: {rate:.1f} Hz | dt: {dt * 1000:.2f} ms | "
-                f"linear accel: {linear_accel} | |v|: {np.linalg.norm(state.v):.3f}"
-            )
-            print(
-                f"IMU diagnostics: raw accel={accel} | ba={filter_ref.state.ba} | "
-                f"buffer={len(imu_measurement_buffer)} | "
-                f"invalid readings={invalid_reading_count}"
-            )
-            rate_last_report = report_time
+        # prediction_count += 1
+        # report_time = time.monotonic()
+        # if report_time - rate_last_report >= 1.0:
+        #     elapsed = report_time - rate_started
+        #     rate = prediction_count / elapsed if elapsed > 0 else 0.0
+        #     # This value is the acceleration driving the integration.  At rest it
+        #     # should be close to zero on every axis; otherwise position must drift.
+        #     linear_accel = filter_ref.state.R @ (accel - filter_ref.state.ba) - filter_ref.state.g
+        #     print(
+        #         f"IMU prediction rate: {rate:.1f} Hz | dt: {dt * 1000:.2f} ms | "
+        #         f"linear accel: {linear_accel} | |v|: {np.linalg.norm(state.v):.3f}"
+        #     )
+        #     print(
+        #         f"IMU diagnostics: raw accel={accel} | ba={filter_ref.state.ba} | "
+        #         f"buffer={len(imu_measurement_buffer)} | "
+        #         f"invalid readings={invalid_reading_count}"
+        #     )
+        #     rate_last_report = report_time
 
 
 if __name__ == "__main__":
