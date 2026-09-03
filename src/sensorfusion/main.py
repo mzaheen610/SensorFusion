@@ -21,10 +21,9 @@ filter = ESIKFStateEstimator()
 
 def imu_thread(imu, filter_ref):
     prev_time = None
-    # prediction_count = 0
-    # invalid_reading_count = 0
+    prediction_count = 0
     rate_started = time.monotonic()
-    # rate_last_report = rate_started
+    rate_last_report = rate_started
     while True:
         imu_data = imu.get_readings()
         now = time.time()
@@ -63,35 +62,25 @@ def imu_thread(imu, filter_ref):
             prev_time = now
             continue
         prev_time = now
-        # if prediction_count % 25 == 0:
-        #     print(
-        #         "raw accel:", accel,
-        #         "ba:", filter_ref.state.ba,
-        #         "corrected body:", accel - filter_ref.state.ba,
-        #     )
+
         with state_lock:
             state, cov = filter_ref.predict((gyro, accel), dt)
             imu_state = (now, copy.deepcopy(state)) #store the timestamp and state for backpropogation of LiDAR points
             imu_state_buffer.append(imu_state)
 
-        # prediction_count += 1
-        # report_time = time.monotonic()
-        # if report_time - rate_last_report >= 1.0:
-        #     elapsed = report_time - rate_started
-        #     rate = prediction_count / elapsed if elapsed > 0 else 0.0
-        #     # This value is the acceleration driving the integration.  At rest it
-        #     # should be close to zero on every axis; otherwise position must drift.
-        #     linear_accel = filter_ref.state.R @ (accel - filter_ref.state.ba) - filter_ref.state.g
-        #     print(
-        #         f"IMU prediction rate: {rate:.1f} Hz | dt: {dt * 1000:.2f} ms | "
-        #         f"linear accel: {linear_accel} | |v|: {np.linalg.norm(state.v):.3f}"
-        #     )
-        #     print(
-        #         f"IMU diagnostics: raw accel={accel} | ba={filter_ref.state.ba} | "
-        #         f"buffer={len(imu_measurement_buffer)} | "
-        #         f"invalid readings={invalid_reading_count}"
-        #     )
-        #     rate_last_report = report_time
+        prediction_count += 1
+        report_time = time.monotonic()
+        if report_time - rate_last_report >= 1.0:
+            elapsed = report_time - rate_started
+            rate = prediction_count / elapsed if elapsed > 0 else 0.0
+            # This value is the acceleration driving the integration.  At rest it
+            # should be close to zero on every axis; otherwise position must drift.
+            linear_accel = filter_ref.state.R @ (accel - filter_ref.state.ba) - filter_ref.state.g
+            print(
+                f"IMU prediction rate: {rate:.1f} Hz | dt: {dt * 1000:.2f} ms | "
+                f"linear accel: {linear_accel} | |v|: {np.linalg.norm(state.v):.3f}"
+            )
+            rate_last_report = report_time
 
 
 if __name__ == "__main__":
@@ -177,53 +166,9 @@ if __name__ == "__main__":
     prev_time = time.time()
 
     while(True):
-
         now = time.time()
         if now - prev_time >= 1:
             prev_time = now
             with state_lock:
                 state = filter.state
                 print("Current state (x,y,z): ", state.p)
-
-# def camera_thread(cam, state_lock, filter, map, imu_measurement_buffer, lidar_scan_queue):
-#         #Get the camera scan at 10Hz
-#         frame = cam.get_frame()
-        
-#         #find visual map points for the current image frame based on current pose and current lidar scan
-#         visual_map_points = map.query_visible_voxels(lidar_scan_queue, filter.state) #visible voxel query
-
-#         #project lidar points to the current camera frame (u,v)
-#         R_CI = np.eye(3) 
-#         t_CI = np.eye(3)
-
-#         T_CI = np.eye(4) #dummy camera imu extrinsics, real values have to be calibrated later
-#         T_CI[:3, :3] = R_CI
-#         T_CI[:3, 3] = t_CI
-
-#         projected_points_pixels = project_points_to_frame(visual_map_points, T_GI, T_CI)
-
-#         residual_list =[]
-
-#         #get the 8x8 pixel patch surrounding the current lidar point
-#         for point in projected_points_pixels:
-#             #get the 8x8 patch surrounding the pixel
-#             pixel = point[1]
-#             u = pixel[0]
-#             v = pixel[1]
-#             current_patch = frame[u-4:u+4, v-4:v+4]
-
-#             reference_patch = map.get_reference_patch(point)
-
-#             #if the current point doesnt have a patch add the new patch and continue
-#             if reference_patch is None:
-#                 #attach the patch to the lidar map point
-#                 map.add_visual_patch(point, current_patch)
-#                 continue
-
-#             #calculate the photometric residual for each of the points
-#             residual = calculate_photometric_error(current_patch, reference_patch)
-
-#             #add the point residual to the total residual
-#             residual_list.append(residual)
-#         #do the camera based update using the residual and Kalman Gain
-#         #
