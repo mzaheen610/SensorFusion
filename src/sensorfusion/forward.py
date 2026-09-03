@@ -178,7 +178,7 @@ class ESIKFStateEstimator:
             kalman_gain = None
             H = None
             self.last_lidar_association_count = len(valid_associations)
-            max_iterations = 10
+            max_iterations = 1
             P_inv = np.linalg.inv(P_copy)
 
             # --- ITERATED EKF UPDATE ---

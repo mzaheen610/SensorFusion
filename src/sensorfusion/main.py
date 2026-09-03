@@ -11,7 +11,7 @@ from threading import Thread,Lock
 from multiprocessing import Process, Queue
 from collections import deque
 import copy
-from utils.map_stream import tcp_stream_thread
+# from utils.map_stream import tcp_stream_thread
 
 state_lock = Lock()
 buffer_lock = Lock()
@@ -102,6 +102,7 @@ if __name__ == "__main__":
 
     time.sleep(1.0)   # Let BNO055 finish initializing
     filter.state.R, filter.state.bg, filter.state.ba = imu.initialize_rotation_gyro()
+    filter.state.ba = np.zeros(3)
     filter.state.g = np.zeros(3)  #gravity is already removed by the chip's linear_acceleration output; don't subtract it again
     initial_covariance = 100 * np.eye(18)
 
@@ -141,26 +142,26 @@ if __name__ == "__main__":
     # data to backlog; the acquisition worker always retains the latest scan.
     lidar_scan_queue = Queue(maxsize=1) #queue to store the lidar scans
 
-    """
-    Start Lidar scan acquisition process
-    """
-    lidar_acquisition_worker = Process(
-        target=lidar_acquisition_process,
-        args=("/dev/ttyUSB0", lidar_scan_queue),
-        daemon=True,
-    )
-    lidar_acquisition_worker.start()
+    # """
+    # Start Lidar scan acquisition process
+    # """
+    # lidar_acquisition_worker = Process(
+    #     target=lidar_acquisition_process,
+    #     args=("/dev/ttyUSB0", lidar_scan_queue),
+    #     daemon=True,
+    # )
+    # lidar_acquisition_worker.start()
 
-    """
-    Start the LiDAR processing and update thread
-    """
-    lidar_worker = Thread(
-        target=lidar_thread,
-        args=(state_lock, buffer_lock, filter, map, imu_measurement_buffer,
-              lidar_prev_scan_time, lidar_scan_queue),
-        daemon=True,
-    )
-    lidar_worker.start()
+    # """
+    # Start the LiDAR processing and update thread
+    # """
+    # lidar_worker = Thread(
+    #     target=lidar_thread,
+    #     args=(state_lock, buffer_lock, filter, map, imu_measurement_buffer,
+    #           lidar_prev_scan_time, lidar_scan_queue),
+    #     daemon=True,
+    # )
+    # lidar_worker.start()
 
     time.sleep(10) #wait for the lidar process to initialize properly
 
