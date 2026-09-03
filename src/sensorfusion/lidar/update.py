@@ -6,6 +6,7 @@ import time
 import numpy as np
 from queue import Empty, Full
 from lidar.backward import backprop
+from utils.similarity import scan_similarity, scan_to_bins
 
 # Set to True when inspecting individual scans. Keep False during normal runs
 # because console I/O can noticeably reduce throughput on a Raspberry Pi.
@@ -78,6 +79,11 @@ def lidar_thread(state_lock, buffer_lock, filter, map, imu_measurement_buffer,
     empty_compensation_count = 0
     rate_started = time.monotonic()
     rate_last_report = rate_started
+
+    prev_scan_bins = None
+    static_count = 0
+    ZUPT_CONSECUTIVE_REQUIRED = 5
+    ZUPT_DIST_THRESHOLD_MM = 15 #mm
     while True:
         try:
             scan = scan_queue.get()
@@ -152,6 +158,22 @@ def lidar_thread(state_lock, buffer_lock, filter, map, imu_measurement_buffer,
                     filter.P = P_new
                 if points_world is not None:
                     map.add_points(points_world)
+
+                # --- ZUPT check  ---
+                current_bins = scan_to_bins(scan)
+                if prev_scan_bins is not None:
+                    sim = scan_similarity(current_bins, prev_scan_bins)
+                    print("Scan similarity between scans is:", sim)
+                    if sim is not None and sim < ZUPT_DIST_THRESHOLD_MM:
+                        static_count += 1
+                    else:
+                        static_count = 0
+                prev_scan_bins = current_bins
+                if static_count >= ZUPT_CONSECUTIVE_REQUIRED:
+                    filter.zupt_update()
+                    if DEBUG_LIDAR:
+                        print(f"ZUPT applied | static_count={static_count}")
+
             #DEBUG THE LIDAR SCAN AND EKF UPDATE RATE  
             report_time = time.monotonic()
             if report_time - rate_last_report >= 1.0:

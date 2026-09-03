@@ -178,7 +178,7 @@ class ESIKFStateEstimator:
             kalman_gain = None
             H = None
             self.last_lidar_association_count = len(valid_associations)
-            max_iterations = 1
+            max_iterations = 5
             P_inv = np.linalg.inv(P_copy)
 
             # --- ITERATED EKF UPDATE ---
@@ -277,3 +277,30 @@ class ESIKFStateEstimator:
             return points_world_final, self.last_lidar_update_applied, P_new
 
         return None, False, P_copy
+
+    def zupt_update(self, sigma_zupt=0.05):
+        """
+        Zero-velocity pseudo-measurement update. Call when LiDAR scan similarity
+        indicates the platform is stationary. Directly modifies self.state/self.P.
+        """
+        state = self.state
+        H = np.zeros((3, 18))
+        H[:, 6:9] = np.eye(3)   # measurement model observes velocity directly
+
+        r = -state.v            # residual = measured(0) - predicted velocity
+
+        R_zupt = (sigma_zupt ** 2) * np.eye(3)
+        S = H @ self.P @ H.T + R_zupt
+        K = self.P @ H.T @ np.linalg.inv(S)
+        dx = K @ r
+
+        theta_rot = dx[0:3]
+        state.R = state.R @ exp(theta_rot)
+        state.p  += dx[3:6]
+        state.v  += dx[6:9]
+        state.bg += dx[9:12]
+        state.ba += dx[12:15]
+        state.g  += dx[15:18]
+
+        I = np.eye(18)
+        self.P = (I - K @ H) @ self.P
