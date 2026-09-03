@@ -78,4 +78,4 @@ def backprop(scan_end_time, prev_scan_time, imu_pose, scan, imu_measurement_buff
         # print("p_kj: ", p_kj)
         projected_point = R_kj @ point_body + p_kj
         compensated_points.append(projected_point)
-    return compensated_points
+    return np.asarray(compensated_points, dtype=float).reshape(-1, 3)

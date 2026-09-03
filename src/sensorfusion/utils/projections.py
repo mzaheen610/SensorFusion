@@ -47,7 +47,8 @@ def calculate_photometric_error(curr_frame, ref_frame, pixels):
         for j in range(n):
             res = curr_frame[i][j] - ref_frame[i][j]
             residual.append(res)
-            
+    return residual
+
 def visual_update(frame, state):
     #compute the visual update based on the camera scan
     pass

@@ -96,6 +96,10 @@ def lidar_thread(state_lock, buffer_lock, filter, map, imu_measurement_buffer,
                 now, lidar_prev_scan_time["time"], state, scan, imu_buffer
             )
             lidar_prev_scan_time["time"] = now
+
+            if lidar_points_compensated.shape[0] == 0:
+                continue
+
             if DEBUG_LIDAR:
                 for i in range(min(5, len(scan))):
                     print("Original LiDAR points: ", scan[i])
@@ -142,7 +146,7 @@ def lidar_thread(state_lock, buffer_lock, filter, map, imu_measurement_buffer,
                 # Cleanly discard old items without touching newly appended ones
                 while imu_measurement_buffer and imu_measurement_buffer[0][0] < lidar_prev_scan_time["time"]:
                     imu_measurement_buffer.popleft()
-                    
+
         except Exception as e:
             print(f"[lidar_thread] FATAL: {type(e).__name__}: {e}", flush=True)
-            raise 
+            continue
