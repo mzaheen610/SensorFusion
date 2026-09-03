@@ -39,6 +39,7 @@ class ESIKFStateEstimator:
         self.last_lidar_update_applied = False
         self.last_lidar_residual_count = 0
         self.last_lidar_residual_norm = None
+        self.last_lidar_association_count = 0
     def compute_jacobian(self, x_prev, u, dt):
         #Computing Jacobian of the state model wrt the state error delta_x
         # dt = dt
@@ -102,6 +103,7 @@ class ESIKFStateEstimator:
         self.last_lidar_update_applied = False
         self.last_lidar_residual_count = 0
         self.last_lidar_residual_norm = None
+        self.last_lidar_association_count = 0
         # state_updated = np.array()
         eps = 0.01
         MIN_INITIAL_POINTS = 30
@@ -175,6 +177,7 @@ class ESIKFStateEstimator:
 
             kalman_gain = None
             H = None
+            self.last_lidar_association_count = len(valid_associations)
             max_iterations = 10
             P_inv = np.linalg.inv(P_copy)
 

@@ -9,7 +9,7 @@ from lidar.backward import backprop
 
 # Set to True when inspecting individual scans. Keep False during normal runs
 # because console I/O can noticeably reduce throughput on a Raspberry Pi.
-DEBUG_LIDAR = False
+DEBUG_LIDAR = True
 
 
 #Moved the lidar scan acquisition to a seperate thread to limit lidar scan flag mismatch
@@ -75,6 +75,7 @@ def lidar_thread(state_lock, buffer_lock, filter, map, imu_measurement_buffer,
     """
     scan_count = 0
     update_count = 0
+    empty_compensation_count = 0
     rate_started = time.monotonic()
     rate_last_report = rate_started
     while True:
@@ -92,12 +93,24 @@ def lidar_thread(state_lock, buffer_lock, filter, map, imu_measurement_buffer,
                 imu_buffer = list(imu_measurement_buffer)
 
             now = time.time()
+            scan_start = time.monotonic()
             lidar_points_compensated = backprop(
                 now, lidar_prev_scan_time["time"], state, scan, imu_buffer
             )
             lidar_prev_scan_time["time"] = now
 
             if lidar_points_compensated.shape[0] == 0:
+                empty_compensation_count += 1
+                if DEBUG_LIDAR:
+                    print(
+                        f"LiDAR compensation skipped: scan_points={len(scan)} | "
+                        f"imu_buffer={len(imu_buffer)} | "
+                        f"scan_age={now - imu_buffer[0][0]:.3f}s"
+                        if imu_buffer else
+                        f"LiDAR compensation skipped: scan_points={len(scan)} | "
+                        "imu_buffer=0",
+                        flush=True,
+                    )
                 continue
 
             if DEBUG_LIDAR:
@@ -110,6 +123,17 @@ def lidar_thread(state_lock, buffer_lock, filter, map, imu_measurement_buffer,
             points_world, update_applied, P_new = filter.lidar_update(
                 scan, state, P_copy, lidar_points_compensated, map
             )
+            scan_duration = time.monotonic() - scan_start
+            if DEBUG_LIDAR:
+                print(
+                    f"LiDAR update diagnostics: compensated={len(lidar_points_compensated)} | "
+                    f"map_points={map.num_points()} | "
+                    f"associations={filter.last_lidar_association_count} | "
+                    f"applied={update_applied} | "
+                    f"residuals={filter.last_lidar_residual_count} | "
+                    f"duration={scan_duration:.3f}s",
+                    flush=True,
+                )
             with state_lock:
                 scan_count += 1
                 if update_applied:
@@ -135,11 +159,18 @@ def lidar_thread(state_lock, buffer_lock, filter, map, imu_measurement_buffer,
                 scan_rate = scan_count / elapsed if elapsed > 0 else 0.0
                 update_rate = update_count / elapsed if elapsed > 0 else 0.0
                 if DEBUG_LIDAR:
+                    interval = report_time - rate_last_report
                     print(
-                        f"LiDAR scan rate: {scan_rate:.2f} Hz | EKF update rate: "
-                        f"{update_rate:.2f} Hz | latest residuals: "
-                        f"{filter.last_lidar_residual_count}"
+                        f"LiDAR scan rate: {scan_count / interval:.2f} Hz | "
+                        f"EKF update rate: {update_count / interval:.2f} Hz | "
+                        f"latest residuals: "
+                        f"{filter.last_lidar_residual_count} | "
+                        f"empty compensation: {empty_compensation_count} | "
+                        f"interval: {interval:.2f}s"
                     )
+                scan_count = 0
+                update_count = 0
+                empty_compensation_count = 0
                 rate_last_report = report_time
             #clear the imu buffer after the current batch is processed
             with buffer_lock:
