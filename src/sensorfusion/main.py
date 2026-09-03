@@ -81,7 +81,7 @@ def imu_thread(imu, filter_ref):
                 # f"linear accel: {linear_accel} | |v|: {np.linalg.norm(state.v):.3f}"
             )
             rate_last_report = report_time
-
+        time.sleep(0.01)
 
 if __name__ == "__main__":
     filter = ESIKFStateEstimator()
@@ -91,7 +91,7 @@ if __name__ == "__main__":
 
     time.sleep(1.0)   # Let BNO055 finish initializing
     filter.state.R, filter.state.bg, filter.state.ba = imu.initialize_rotation_gyro()
-    filter.state.ba = np.zeros(3)
+    # filter.state.ba = np.zeros(3)
     filter.state.g = np.zeros(3)  #gravity is already removed by the chip's linear_acceleration output; don't subtract it again
     initial_covariance = 100 * np.eye(18)
 
@@ -141,6 +141,13 @@ if __name__ == "__main__":
     )
     lidar_acquisition_worker.start()
 
+
+    """
+    Starting the IMU thread - data acquisition and forward propogation
+    """
+    imu_worker = Thread(target=imu_thread, args=(imu, filter), daemon=True)
+    imu_worker.start()
+
     """
     Start the LiDAR processing and update thread
     """
@@ -153,12 +160,6 @@ if __name__ == "__main__":
     lidar_worker.start()
 
     time.sleep(10) #wait for the lidar process to initialize properly
-
-    """
-    Starting the IMU thread - data acquisition and forward propogation
-    """
-    imu_worker = Thread(target=imu_thread, args=(imu, filter), daemon=True)
-    imu_worker.start()
 
     # stream_thread = Thread(target=tcp_stream_thread, args=(map, filter, state_lock), daemon=True)
     # stream_thread.start()
