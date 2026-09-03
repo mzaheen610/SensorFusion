@@ -131,26 +131,26 @@ if __name__ == "__main__":
     # data to backlog; the acquisition worker always retains the latest scan.
     lidar_scan_queue = Queue(maxsize=1) #queue to store the lidar scans
 
-    # """
-    # Start Lidar scan acquisition process
-    # """
-    # lidar_acquisition_worker = Process(
-    #     target=lidar_acquisition_process,
-    #     args=("/dev/ttyUSB0", lidar_scan_queue),
-    #     daemon=True,
-    # )
-    # lidar_acquisition_worker.start()
+    """
+    Start Lidar scan acquisition process
+    """
+    lidar_acquisition_worker = Process(
+        target=lidar_acquisition_process,
+        args=("/dev/ttyUSB0", lidar_scan_queue),
+        daemon=True,
+    )
+    lidar_acquisition_worker.start()
 
-    # """
-    # Start the LiDAR processing and update thread
-    # """
-    # lidar_worker = Thread(
-    #     target=lidar_thread,
-    #     args=(state_lock, buffer_lock, filter, map, imu_measurement_buffer,
-    #           lidar_prev_scan_time, lidar_scan_queue),
-    #     daemon=True,
-    # )
-    # lidar_worker.start()
+    """
+    Start the LiDAR processing and update thread
+    """
+    lidar_worker = Thread(
+        target=lidar_thread,
+        args=(state_lock, buffer_lock, filter, map, imu_measurement_buffer,
+              lidar_prev_scan_time, lidar_scan_queue),
+        daemon=True,
+    )
+    lidar_worker.start()
 
     time.sleep(10) #wait for the lidar process to initialize properly
 
@@ -172,4 +172,4 @@ if __name__ == "__main__":
             with state_lock:
                 state = filter.state
                 print("Current state (x,y,z): ", state.p)
-        time.sleep(0.05)
+        time.sleep(0.05) #DO NOT REMOVE THIS
