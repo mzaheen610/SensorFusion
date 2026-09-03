@@ -172,3 +172,4 @@ if __name__ == "__main__":
             with state_lock:
                 state = filter.state
                 print("Current state (x,y,z): ", state.p)
+        time.sleep(0.05)
