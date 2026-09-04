@@ -30,7 +30,7 @@ class Map:
     def __init__(self):
         self.voxel_map = {}
         self.voxel_size = 0.5
-
+        self.max_points_per_voxel = 20
     def num_points(self):
         count = 0
         for key in self.voxel_map.keys():
@@ -51,10 +51,12 @@ class Map:
                     "lidar": [],
                     "image": []
                 }
-                self.voxel_map[key]["lidar"].append(point)
-            else:
-                self.voxel_map[key]["lidar"].append(point)
-    
+            voxel = self.voxel_map[key]
+            #cap the points in a voxel to bound the map size
+            if len(voxel["lidar"]) < self.max_points_per_voxel:   
+                voxel["lidar"].append(point)
+
+            
     def query(self, point, min_points_in_voxel=10, radius_voxels=1):
         # Find neighbors from the current voxel first.
         # Expand to adjacent voxels only when the current voxel is sparse.
