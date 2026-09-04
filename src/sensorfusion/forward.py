@@ -24,7 +24,12 @@ class State:
 class ESIKFStateEstimator:
     def __init__(self):
         self.P = 1 * np.eye(18) # process covariance matrix
-        self.Q = np.eye(18) # process noise covariance
+        self.q_rot = 1e-3      # rad^2/s -- gyro noise density
+        self.q_pos = 1e-4      # m^2/s (loosely, position integrates velocity)
+        self.q_vel = 1e-2      # (m/s)^2/s -- accel noise density
+        self.q_gyro_bias = 1e-8   # rad^2/s -- gyro bias random walk (slow)
+        self.q_accel_bias = 1e-6  # (m/s^2)^2/s -- accel bias random walk (slow)
+        self.q_gravity = 1e-10    # near-static; only nudge via correlation
         self.R = np.eye(3) # measurement matrix
         dt = 0.01  # IMU is at 100Hz, so time step is 0.01 seconds
         self.state = State(
@@ -40,6 +45,19 @@ class ESIKFStateEstimator:
         self.last_lidar_residual_count = 0
         self.last_lidar_residual_norm = None
         self.last_lidar_association_count = 0
+
+    def compute_process_noise(self, dt):
+        """Q, scaled by dt 
+        """
+        Q = np.zeros((18, 18))
+        Q[0:3, 0:3]   = self.q_rot * dt * np.eye(3)
+        Q[3:6, 3:6]   = self.q_pos * dt * np.eye(3)
+        Q[6:9, 6:9]   = self.q_vel * dt * np.eye(3)
+        Q[9:12, 9:12] = self.q_gyro_bias * dt * np.eye(3)
+        Q[12:15, 12:15] = self.q_accel_bias * dt * np.eye(3)
+        Q[15:18, 15:18] = self.q_gravity * dt * np.eye(3)
+        return Q
+    
     def compute_jacobian(self, x_prev, u, dt):
         #Computing Jacobian of the state model wrt the state error delta_x
         # dt = dt
@@ -83,7 +101,7 @@ class ESIKFStateEstimator:
         self.state.v += accel * dt
 
         #Covariance update
-        self.P = A @ self.P @ A.T + self.Q
+        self.P = A @ self.P @ A.T + self.compute_process_noise(dt)
         return self.state, self.P
 
     def lidar_update(self, scan, state, P_copy, lidar_points_compensated, map):
