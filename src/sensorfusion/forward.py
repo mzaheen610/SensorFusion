@@ -170,8 +170,8 @@ class ESIKFStateEstimator:
                 neighbors = map.query(point_world_coords)
                 if neighbors is None or (len(neighbors) < 3):
                     continue
-                if DEBUG_LIDAR:
-                    print("Number of neighbors for a point", len(neighbors))
+                # if DEBUG_LIDAR:
+                #     print("Number of neighbors for a point", len(neighbors))
                 
                 center = np.mean(neighbors, axis=0) 
                 centered_neighbors = neighbors - center
@@ -233,8 +233,8 @@ class ESIKFStateEstimator:
                     #reject large residuals
                     if abs(res) > 0.80:
                         continue
-                    if DEBUG_LIDAR:
-                        print("Plane residual:", res)
+                    # if DEBUG_LIDAR:
+                    #     print("Plane residual:", res)
                         
                     residuals.append(res)
                     #lidar jacobian computation
@@ -279,6 +279,13 @@ class ESIKFStateEstimator:
 
                 if DEBUG_LIDAR:
                     print("State correction error norm", np.linalg.norm(dx))
+                    print("dx:", dx)
+                    print("rot:", dx[:3])
+                    print("pos:", dx[3:6])
+                    print("vel:", dx[6:9])
+                    print("bg:", dx[9:12])
+                    print("ba:", dx[12:15])
+                    print("g:", dx[15:18])
                 if np.linalg.norm(dx) < eps:
                     break
 
