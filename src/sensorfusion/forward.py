@@ -186,17 +186,37 @@ class ESIKFStateEstimator:
                 if s[0] < 1e-6:
                     continue  # degenerate, no structure
                 
-                ratio = s[1] / s[0]
-                if ratio > 0.3 and z_spread >= MIN_Z_SPREAD_FOR_PLANE:
+                ratio21 = s[1] / (s[0] + 1e-9)  # 2nd-largest spread / largest spread
+                ratio31 = s[2] / (s[0] + 1e-9)  # smallest spread / largest spread
+
+
+                if ratio21 < 0.15:  # optional stricter check, or just an else
+                    # Edge/line feature: store direction to calculate dynamic residual later
+                    direction = vh[0, :]  # principal direction of the line
+                    valid_associations.append(('line', point_lidar, center, direction))
+                    if DEBUG_LIDAR:
+                        print(
+                            f"LINE: s={s}, "
+                            f"s1/s0={ratio21:.3f}, "
+                            f"s2/s0={ratio31:.3f}"
+                        )
+                elif ratio21 > 0.3 and ratio31<0.1:
                     normal = vh[-1, :]  # Plane normal vector
                     valid_associations.append(('plane', point_lidar, center, normal))
                     if DEBUG_LIDAR:
                         print("Singular Values for plane:", s)
-                elif s[1] / s[0] < 0.15:  # optional stricter check, or just an else
-                    # Edge/line feature: store direction to calculate dynamic residual later
-                    direction = vh[0, :]  # principal direction of the line
-                    valid_associations.append(('line', point_lidar, center, direction))
+                        print(
+                            f"PLANE: s={s}, "
+                            f"s1/s0={ratio21:.3f}, "
+                            f"s2/s0={ratio31:.3f}"
+                        )
                 else:
+                    if DEBUG_LIDAR:
+                        print(
+                            f"REJECT: s={s}, "
+                            f"s1/s0={ratio21:.3f}, "
+                            f"s2/s0={ratio31:.3f}"
+                        )
                     continue  # ambiguous, skip
 
             kalman_gain = None
