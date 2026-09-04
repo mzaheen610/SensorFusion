@@ -107,6 +107,7 @@ class ESIKFStateEstimator:
         # state_updated = np.array()
         eps = 0.01
         MIN_INITIAL_POINTS = 30
+        MIN_ASSOCIATIONS = 10
         P_new = P_copy # Default fallback
 
         #Iterated Kalman Update
@@ -156,6 +157,11 @@ class ESIKFStateEstimator:
                 
                 center = np.mean(neighbors, axis=0) 
                 centered_neighbors = neighbors - center
+
+                #to restrict plane associations for a 2D lidar based points
+                z_spread = neighbors[:, 2].max() - neighbors[:, 2].min()
+                MIN_Z_SPREAD_FOR_PLANE = 0.10  
+
                 #find the normal to the plane based on the SVD
                 _, s, vh = np.linalg.svd(centered_neighbors)
 
@@ -163,7 +169,7 @@ class ESIKFStateEstimator:
                     continue  # degenerate, no structure
                 
                 ratio = s[1] / s[0]
-                if ratio > 0.3:
+                if ratio > 0.3 and z_spread >= MIN_Z_SPREAD_FOR_PLANE:
                     normal = vh[-1, :]  # Plane normal vector
                     valid_associations.append(('plane', point_lidar, center, normal))
                     if DEBUG_LIDAR:
@@ -230,6 +236,10 @@ class ESIKFStateEstimator:
                     if DEBUG_LIDAR:
                         print("No valid LiDAR points for EKF update")
                     break
+                elif len(H_list) < MIN_ASSOCIATIONS:
+                    if DEBUG_LIDAR:
+                        print(f"Too few associations ({len(H_list)}), skipping update")
+                    break
 
                 if DEBUG_LIDAR:
                     print("Len of H_list", len(H_list))
@@ -252,6 +262,12 @@ class ESIKFStateEstimator:
                 if DEBUG_LIDAR:
                     print("State correction error norm", np.linalg.norm(dx))
                 if np.linalg.norm(dx) < eps:
+                    break
+
+                MAX_CORRECTION_NORM = 2.0  # to be tuned based on realistic per-update movement of platform
+                if not np.all(np.isfinite(dx)) or np.linalg.norm(dx) > MAX_CORRECTION_NORM:
+                    if DEBUG_LIDAR:
+                        print(f"Rejecting implausible correction, norm={np.linalg.norm(dx)}")
                     break
 
                 theta_rot = dx[0:3]
