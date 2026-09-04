@@ -9,7 +9,7 @@ import numpy as np
 from utils.projections import project_points_world
 # Per-point logging is extremely expensive on a Raspberry Pi. Enable only when
 # diagnosing a specific scan.
-DEBUG_LIDAR = False
+DEBUG_LIDAR = True
 #Kalman filter --- Prediction, Update/Correction
 
 @dataclass
