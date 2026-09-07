@@ -63,10 +63,12 @@ def receive_stream(robot_ip="10.12.228.214", port=5000):
             # -----------------------------
             payload = pickle.loads(frame_data)
             map_points = payload["map_points"]
+            raw_colors = payload["colors"]
             points = np.asarray(
                 map_points,
                 dtype=np.float64
             )
+            colors = np.asarray(raw_colors, dtype=np.float64) / 255.0 
             # -----------------------------
             # Check point cloud
             # -----------------------------
@@ -90,7 +92,9 @@ def receive_stream(robot_ip="10.12.228.214", port=5000):
             # Update point cloud
             # -----------------------------
             pcd.points = o3d.utility.Vector3dVector(points)
+            pcd.colors = o3d.utility.Vector3dVector(colors)
             visualizer.update_geometry(pcd)
+
             # -----------------------------
             # Set camera on first frame
             # -----------------------------

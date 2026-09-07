@@ -14,10 +14,14 @@ def project_points_to_frame(points, cam_imu_transform, glob_imu):
     glob_imu_inv = np.linalg.inv(glob_imu)
     for point in points:
         #project the points first to the camera coordinates
-        camera_coords = cam_imu_transform @ glob_imu_inv @ point
+        point_h = np.append(point, 1.0)
+        camera_coords = cam_imu_transform @ glob_imu_inv @ point_h
+        if not np.all(np.isfinite(camera_coords)) or camera_coords[2] <= 0:
+            continue
         #project points to the image frame
         pixel_coords = project(camera_coords)
-        if (pixel_coords[0]< 640) and (pixel_coords[0]< 480):
+        if (0 <= pixel_coords[0] < 640
+                and 0 <= pixel_coords[1] < 480):
             #reject points outside the frame range (640, 480)
             pixels.append((point, pixel_coords))
     return pixels
@@ -38,7 +42,7 @@ def project(coords):
     v = focals[1]*coords[1]/coords[2] + center[1]
     return (u,v) #the pixel coord equivalent of the 3D points
 
-def calculate_photometric_error(curr_frame, ref_frame, pixels):
+def calculate_photometric_error(curr_frame, ref_frame, pixels=None):
     m = len(curr_frame)
     n = len(curr_frame[0])
     residual = []

@@ -56,6 +56,11 @@ def compute_prev_pose(current_state, delta_time, gyro, accel):
 
     delta_theta = ang_act * delta_time
     delta_R = exp(delta_theta)
+    print( "dt =", delta_time, 
+          "gyro_norm =", np.linalg.norm(gyro),
+          "delta_theta_norm =", np.linalg.norm(delta_theta), 
+          "R_error =", np.linalg.norm(x_prev.R.T @ x_prev.R - np.eye(3)),
+          "det(R) =", np.linalg.det(x_prev.R))
     x_prev.R = x_prev.R @ delta_R.T  #del_theta = w*del_t --> converted to proper SO(3) before adding to the rotation matrix(SO(3))
     x_prev.p -= (x_prev.v * delta_time) - (0.5 * accel * delta_time**2)
     x_prev.v -= accel * delta_time

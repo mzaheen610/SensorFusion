@@ -14,7 +14,7 @@ DEBUG_LIDAR = True
 
 
 #Moved the lidar scan acquisition to a seperate thread to limit lidar scan flag mismatch
-def lidar_acquisition_thread(lidar, scan_queue):
+def lidar_acquisition_thread(lidar, scan_queue, camera_scan_queue=None):
     """Continuously drain the LiDAR serial stream into a latest-scan queue."""
     scan_count = 0
     last_report = time.monotonic()
@@ -52,8 +52,18 @@ def lidar_acquisition_thread(lidar, scan_queue):
             except Full:
                 pass
 
+        if camera_scan_queue is not None:
+            try:
+                camera_scan_queue.put_nowait((scan_timestamp, scan))
+            except Full:
+                try:
+                    camera_scan_queue.get_nowait()
+                    camera_scan_queue.put_nowait((scan_timestamp, scan))
+                except (Empty, Full):
+                    pass
 
-def lidar_acquisition_process(port, scan_queue):
+
+def lidar_acquisition_process(port, scan_queue, camera_scan_queue=None):
     """Own the serial device in a separate process from fusion work."""
     print("LiDAR acquisition process starting.", flush=True)
     try:
@@ -61,7 +71,7 @@ def lidar_acquisition_process(port, scan_queue):
 
         lidar = Lidar(port)
         print("LiDAR acquisition process connected.", flush=True)
-        lidar_acquisition_thread(lidar, scan_queue)
+        lidar_acquisition_thread(lidar, scan_queue, camera_scan_queue)
     except Exception as error:
         print(
             f"LiDAR acquisition process stopped: "

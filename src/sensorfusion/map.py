@@ -49,12 +49,14 @@ class Map:
             if key not in self.voxel_map:
                 self.voxel_map[key]= {
                     "lidar": [],
-                    "image": []
+                    "image": [],
+                    "color": []
                 }
             voxel = self.voxel_map[key]
             #cap the points in a voxel to bound the map size
             if len(voxel["lidar"]) < self.max_points_per_voxel:   
                 voxel["lidar"].append(point)
+                voxel["color"].append(np.array([128.0, 128.0, 128.0]))  # placeholder gray
 
             
     def query(self, point, min_points_in_voxel=10, radius_voxels=1):
@@ -93,10 +95,11 @@ class Map:
         #get the root voxel key since the voxel is 0.5x0.5x0.5 cube and multiple points could belong to the same voxel
         return tuple(np.floor(point/self.voxel_size))
     
-    def query_visible_voxels(self, lidar_scan_queue, state):
+    def query_visible_voxels(self, current_scan, state):
         #find the voxels in the map nearest to the measured points
         #filter based on the camera field of view projected into the lidar FOV
-        current_scan = lidar_scan_queue[-1]
+        if current_scan is None:
+            return []
         #points should be backpropogated and transformed to the world coordinates
         #search for points within the Camera x Lidar FOV limits
         lidar_range = 12
@@ -136,5 +139,26 @@ class Map:
         #choose one image patch as the reference for now
         #will need to find the best patch for reference after score calculation(viewing angle, similarity based) later
         key = self.get_voxel_key(point)
-        patch_list = self.voxel_map[key]["image"]
-        return patch_list[-1]
+        voxel = self.voxel_map.get(key)
+        if voxel is None or not voxel["image"]:
+            return None
+        return voxel["image"][-1]
+
+    def set_point_color(self, point, color):
+        #attach the color to the map point
+        key = self.get_voxel_key(point)
+        voxel = self.voxel_map.get(key)
+        if voxel is None:
+            return
+        # match the exact point object/coords to its index in voxel["lidar"]
+        for i, p in enumerate(voxel["lidar"]):
+            if np.array_equal(p, point):
+                voxel["color"][i] = color
+                break
+
+    def get_all_points_and_colors(self):
+        pts, cols = [], []
+        for voxel in self.voxel_map.values():
+            pts.extend(voxel["lidar"])
+            cols.extend(voxel["color"])
+        return np.array(pts), np.array(cols)

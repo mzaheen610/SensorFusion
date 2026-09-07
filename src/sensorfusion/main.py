@@ -11,7 +11,8 @@ from threading import Thread,Lock
 from multiprocessing import Process, Queue
 from collections import deque
 import copy
-# from utils.map_stream import tcp_stream_thread
+from utils.map_stream import tcp_stream_thread
+from camera.photometry import camera_thread
 
 state_lock = Lock()
 buffer_lock = Lock()
@@ -130,13 +131,14 @@ if __name__ == "__main__":
     # A single-slot queue prevents slow scan processing from allowing serial
     # data to backlog; the acquisition worker always retains the latest scan.
     lidar_scan_queue = Queue(maxsize=1) #queue to store the lidar scans
+    camera_scan_queue = Queue(maxsize=1)
 
     """
     Start Lidar scan acquisition process
     """
     lidar_acquisition_worker = Process(
         target=lidar_acquisition_process,
-        args=("/dev/ttyUSB0", lidar_scan_queue),
+        args=("/dev/ttyUSB0", lidar_scan_queue, camera_scan_queue),
         daemon=True,
     )
     lidar_acquisition_worker.start()
@@ -159,10 +161,18 @@ if __name__ == "__main__":
     )
     lidar_worker.start()
 
+    camera_worker = Thread(
+        target=camera_thread,
+        args=(cam, state_lock, filter, map, imu_measurement_buffer,
+              camera_scan_queue),
+        daemon=True,
+    )
+    camera_worker.start()
+
     time.sleep(10) #wait for the lidar process to initialize properly
 
-    # stream_thread = Thread(target=tcp_stream_thread, args=(map, filter, state_lock), daemon=True)
-    # stream_thread.start()
+    stream_thread = Thread(target=tcp_stream_thread, args=(map,), daemon=True)
+    stream_thread.start()
 
     prev_time = time.monotonic()
 
