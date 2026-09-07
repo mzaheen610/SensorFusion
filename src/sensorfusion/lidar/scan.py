@@ -17,7 +17,8 @@ class LidarScan:
     def start_scan(self):
         #
         lidar = Lidar()
-        self.scan.append((time.time(), lidar.get_readings()))
+        scan = lidar.get_readings()
+        self.scan.append((time.monotonic(), scan))
 
     def stop_scan(self):
         lidar = Lidar()

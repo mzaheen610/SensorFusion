@@ -65,11 +65,12 @@ class IMU:
             time.sleep(0.1)
 
     def get_readings(self):
+        now = time.monotonic()
         gyro = self.sensor.gyro
         # accel = self.sensor.acceleration
         linear_accel = self.sensor.linear_acceleration
         if gyro is not None and linear_accel is not None:
-            return np.array(gyro), np.array(linear_accel)
+            return np.array(gyro), np.array(linear_accel), now
         time.sleep(0.001)
     
     def initialize_rotation_gyro(self):
@@ -82,13 +83,13 @@ class IMU:
         #Collect 5s of IMU data to get the mean acceleration
         self.wait_for_calibration()
         time.sleep(5) #after calibration wait for the sensor to be placed static
-        curr_time = time.time()
+        curr_time = time.monotonic()
         # accel_data = []
         gyro_data = []
         gravity_data = []
         linear_accel_data = []
         
-        while(time.time() - curr_time < 10):
+        while(time.monotonic() - curr_time < 10):
             # accel = self.sensor.acceleration
             gyro = self.sensor.gyro
             gravity = self.sensor.gravity

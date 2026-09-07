@@ -30,9 +30,9 @@ def interpolated_pose(trajectory, target_time):
     """trajectory is newest -> oldest: [(t0, pose0), (t1, pose1), ...] with t0 >= t1 >= ..."""
     if not trajectory:
         return None
-    # Before the oldest cached pose: just use the oldest one we have
-    if target_time <= trajectory[-1][0]:
-        return trajectory[-1][1]
+    # Do not extrapolate when the point is older than the cached trajectory.
+    if target_time < trajectory[-1][0]:
+        return None
     # After the newest (scan_end_time): use that directly
     if target_time >= trajectory[0][0]:
         return trajectory[0][1]
@@ -44,7 +44,7 @@ def interpolated_pose(trajectory, target_time):
         t_lo, pose_lo = trajectory[i + 1]
         if t_lo <= target_time <= t_hi:
             return pose_hi if (t_hi - target_time) <= (target_time - t_lo) else pose_lo
-    return trajectory[-1][1]  # fallback, shouldn't reach here
+    return None
 
 def compute_prev_pose(current_state, delta_time, gyro, accel):
     x_prev = deepcopy(current_state)
@@ -70,7 +70,9 @@ def backprop(scan_end_time, prev_scan_time, imu_pose, scan, imu_measurement_buff
     """
     compensated_points = []
     observed_period = scan_end_time - prev_scan_time
-    scan_period = np.clip(observed_period, 0.08, 0.15)
+    if not 0.05 < observed_period < 0.25:
+        return np.empty((0, 3), dtype=float)
+    scan_period = observed_period
     min_point_time = prev_scan_time
 
     trajectory = build_backward_trajectory(scan_end_time, imu_pose, imu_measurement_buffer, min_point_time)
@@ -98,5 +100,9 @@ def backprop(scan_end_time, prev_scan_time, imu_pose, scan, imu_measurement_buff
         # print("R_kj: ", R_kj)
         # print("p_kj: ", p_kj)
         projected_point = R_kj @ point_body + p_kj
+        if not np.all(np.isfinite(projected_point)):
+            continue
+        if np.linalg.norm(projected_point) > 15.0:
+            continue
         compensated_points.append(projected_point)
     return np.asarray(compensated_points, dtype=float).reshape(-1, 3)

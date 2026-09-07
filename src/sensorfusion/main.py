@@ -26,12 +26,12 @@ def imu_thread(imu, filter_ref):
     rate_last_report = rate_started
     while True:
         imu_data = imu.get_readings()
-        now = time.time()
+        # now = time.time() #sample time is returned from the get_readings() fn
         #Reject none values and validate the readings 
         if imu_data is None:
             # invalid_reading_count += 1
             continue
-        gyro, accel = imu_data
+        gyro, accel, now = imu_data
         if gyro is None or accel is None:
             # invalid_reading_count += 1
             continue
@@ -118,7 +118,7 @@ if __name__ == "__main__":
     for _ in range(100):
         reading = imu.get_readings()
         if reading is not None:
-            _, accel = reading
+            _, accel, _ = reading
             residuals.append(
                 filter.state.R @ (accel - filter.state.ba)
                 - filter.state.g
@@ -126,7 +126,7 @@ if __name__ == "__main__":
         time.sleep(0.01)
     print("Mean stationary residual:", np.mean(residuals, axis=0))
     
-    lidar_prev_scan_time = {"time": time.time()}
+    lidar_prev_scan_time = {"time": time.monotonic()}
     # A single-slot queue prevents slow scan processing from allowing serial
     # data to backlog; the acquisition worker always retains the latest scan.
     lidar_scan_queue = Queue(maxsize=1) #queue to store the lidar scans
@@ -164,10 +164,10 @@ if __name__ == "__main__":
     # stream_thread = Thread(target=tcp_stream_thread, args=(map, filter, state_lock), daemon=True)
     # stream_thread.start()
 
-    prev_time = time.time()
+    prev_time = time.monotonic()
 
     while(True):
-        now = time.time()
+        now = time.monotonic()
         if now - prev_time >= 1:
             prev_time = now
             with state_lock:

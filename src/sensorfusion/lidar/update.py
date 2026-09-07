@@ -24,8 +24,9 @@ def lidar_acquisition_thread(lidar, scan_queue):
             # time.sleep(0.01)
             continue
 
+        scan_timestamp = time.monotonic()
         scan_count += 1
-        now = time.monotonic()
+        now = scan_timestamp
         if now - last_report >= 1.0:
             print(
                 f"LiDAR acquisition rate: {scan_count / (now - last_report):.1f} "
@@ -38,7 +39,7 @@ def lidar_acquisition_thread(lidar, scan_queue):
         # Processing must never make the serial reader wait.  Retain only the
         # most recent complete scan when the fusion update falls behind.
         try:
-            scan_queue.put_nowait(scan)
+            scan_queue.put_nowait((scan_timestamp, scan))
         except Full:
             try:
                 # multiprocessing.Queue uses a feeder thread, so an item may
@@ -47,7 +48,7 @@ def lidar_acquisition_thread(lidar, scan_queue):
             except Empty:
                 continue
             try:
-                scan_queue.put_nowait(scan)
+                scan_queue.put_nowait((scan_timestamp, scan))
             except Full:
                 pass
 
@@ -86,7 +87,7 @@ def lidar_thread(state_lock, buffer_lock, filter, map, imu_measurement_buffer,
     ZUPT_DIST_THRESHOLD_MM = 15 #mm
     while True:
         try:
-            scan = scan_queue.get()
+            scan_timestamp, scan = scan_queue.get()
 
             with state_lock:
                 state = copy.deepcopy(filter.state)
@@ -98,12 +99,15 @@ def lidar_thread(state_lock, buffer_lock, filter, map, imu_measurement_buffer,
             with buffer_lock:
                 imu_buffer = list(imu_measurement_buffer)
 
-            now = time.time()
             scan_start = time.monotonic()
             lidar_points_compensated = backprop(
-                now, lidar_prev_scan_time["time"], state, scan, imu_buffer
+                scan_timestamp,
+                lidar_prev_scan_time["time"],
+                state,
+                scan,
+                imu_buffer,
             )
-            lidar_prev_scan_time["time"] = now
+            lidar_prev_scan_time["time"] = scan_timestamp
 
             if lidar_points_compensated.shape[0] == 0:
                 empty_compensation_count += 1
@@ -111,7 +115,7 @@ def lidar_thread(state_lock, buffer_lock, filter, map, imu_measurement_buffer,
                     print(
                         f"LiDAR compensation skipped: scan_points={len(scan)} | "
                         f"imu_buffer={len(imu_buffer)} | "
-                        f"scan_age={now - imu_buffer[0][0]:.3f}s"
+                        f"scan_age={scan_timestamp - imu_buffer[0][0]:.3f}s"
                         if imu_buffer else
                         f"LiDAR compensation skipped: scan_points={len(scan)} | "
                         "imu_buffer=0",

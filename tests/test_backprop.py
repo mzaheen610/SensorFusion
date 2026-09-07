@@ -32,11 +32,11 @@ class BackpropTests(unittest.TestCase):
         ]
 
         compensated = backprop(
-            scan_end_time=10.0,
-            prev_scan_time=9.0,
+            scan_end_time=10.10,
+            prev_scan_time=10.0,
             imu_pose=imu_pose,
             scan=scan,
-            imu_measurement_buffer=[],
+            imu_measurement_buffer=[(10.0, np.zeros(3), np.zeros(3))],
         )
 
         self.assertEqual(len(compensated), 2)
@@ -51,27 +51,28 @@ class BackpropTests(unittest.TestCase):
         ]
         gyro = np.array([0.0, 0.0, -np.pi / 2.0])
         imu_measurement_buffer = [
-            (0.25, gyro, np.zeros(3)),
-            (0.50, gyro, np.zeros(3)),
-            (0.75, gyro, np.zeros(3)),
+            (1.045, gyro, np.zeros(3)),
+            (1.090, gyro, np.zeros(3)),
+            (1.135, gyro, np.zeros(3)),
+            (1.180, gyro, np.zeros(3)),
         ]
 
         compensated = backprop(
-            scan_end_time=1.0,
-            prev_scan_time=0.0,
+            scan_end_time=1.225,
+            prev_scan_time=1.045,
             imu_pose=imu_pose,
             scan=scan,
             imu_measurement_buffer=imu_measurement_buffer,
         )
 
         expected_first = np.array([
-            np.cos(3.0 * np.pi / 8.0),
-            np.sin(3.0 * np.pi / 8.0),
+            np.cos(0.09 * np.pi),
+            np.sin(0.09 * np.pi),
             0.0,
         ])
         expected_second = np.array([
-            -np.cos(np.pi / 8.0),
-            -np.sin(np.pi / 8.0),
+            -np.cos(0.045 * np.pi),
+            -np.sin(0.045 * np.pi),
             0.0,
         ])
 
