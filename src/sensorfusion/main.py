@@ -156,7 +156,7 @@ if __name__ == "__main__":
     lidar_worker = Thread(
         target=lidar_thread,
         args=(state_lock, buffer_lock, filter, map, imu_measurement_buffer,
-              lidar_prev_scan_time, lidar_scan_queue),
+              imu_state_buffer, lidar_prev_scan_time, lidar_scan_queue),
         daemon=True,
     )
     lidar_worker.start()

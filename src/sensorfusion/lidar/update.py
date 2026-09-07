@@ -81,7 +81,7 @@ def lidar_acquisition_process(port, scan_queue, camera_scan_queue=None):
 
 
 def lidar_thread(state_lock, buffer_lock, filter, map, imu_measurement_buffer,
-                 lidar_prev_scan_time, scan_queue):
+                 imu_state_buffer, lidar_prev_scan_time, scan_queue):
     """
     Backward propogation
     """
@@ -100,14 +100,29 @@ def lidar_thread(state_lock, buffer_lock, filter, map, imu_measurement_buffer,
             scan_timestamp, scan = scan_queue.get()
 
             with state_lock:
-                state = copy.deepcopy(filter.state)
                 P_copy = copy.deepcopy(filter.P)
-
-            # Keep the exact pre-update snapshot so only the correction delta can
-            # be merged into the state that IMU prediction advances concurrently.
-            state_old = copy.deepcopy(state)
             with buffer_lock:
                 imu_buffer = list(imu_measurement_buffer)
+                state_history = list(imu_state_buffer)
+
+            if not state_history:
+                continue
+            state_timestamp, state = min(
+                state_history,
+                key=lambda item: abs(item[0] - scan_timestamp),
+            )
+            if abs(state_timestamp - scan_timestamp) > 0.1:
+                if DEBUG_LIDAR:
+                    print(
+                        f"LiDAR compensation skipped: scan_age="
+                        f"{abs(state_timestamp - scan_timestamp):.3f}s",
+                        flush=True,
+                    )
+                continue
+
+            # Keep the exact pre-update snapshot so only the correction delta can
+            # be merged into the latest state that IMU prediction advances.
+            state_old = copy.deepcopy(state)
 
             scan_start = time.monotonic()
             lidar_points_compensated = backprop(

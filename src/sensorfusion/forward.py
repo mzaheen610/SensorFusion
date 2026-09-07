@@ -221,6 +221,7 @@ class ESIKFStateEstimator:
 
             kalman_gain = None
             H = None
+            correction_applied = False
             self.last_lidar_association_count = len(valid_associations)
             max_iterations = 5
             P_inv = np.linalg.inv(P_copy)
@@ -322,9 +323,10 @@ class ESIKFStateEstimator:
                 state.bg += dx[9:12]
                 state.ba += dx[12:15]
                 state.g  += dx[15:18]
+                correction_applied = True
 
             #Prevent crash when there is no LiDAR update
-            if kalman_gain is not None and H is not None:
+            if correction_applied and kalman_gain is not None and H is not None:
                 I = np.eye(P_copy.shape[0])
                 P_new = (I - kalman_gain @ H) @ P_copy #covariance update
                 self.last_lidar_update_applied = True
