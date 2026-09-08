@@ -188,6 +188,19 @@ def lidar_thread(state_lock, buffer_lock, filter, map, imu_measurement_buffer,
                     filter.state.ba = state.ba
                     filter.state.g = state.g
                     filter.P = P_new
+                    if DEBUG_LIDAR:
+                        print(
+                            "LiDAR merge committed:",
+                            f"delta_position={delta_p}",
+                            f"delta_velocity={delta_v}",
+                            f"position={filter.state.p}",
+                            f"bg={filter.state.bg}",
+                            f"ba={filter.state.ba}",
+                            f"g={filter.state.g}",
+                            f"R_error={np.linalg.norm(filter.state.R.T @ filter.state.R - np.eye(3)):.3e}",
+                            f"det_R={np.linalg.det(filter.state.R):.12f}",
+                            flush=True,
+                        )
                 if points_world is not None and update_applied:
                     map.add_points(points_world)
 

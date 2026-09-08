@@ -194,29 +194,29 @@ class ESIKFStateEstimator:
                     # Edge/line feature: store direction to calculate dynamic residual later
                     direction = vh[0, :]  # principal direction of the line
                     valid_associations.append(('line', point_lidar, center, direction))
-                    if DEBUG_LIDAR:
-                        print(
-                            f"LINE: s={s}, "
-                            f"s1/s0={ratio21:.3f}, "
-                            f"s2/s0={ratio31:.3f}"
-                        )
+                    # if DEBUG_LIDAR:
+                    #     print(
+                    #         f"LINE: s={s}, "
+                    #         f"s1/s0={ratio21:.3f}, "
+                    #         f"s2/s0={ratio31:.3f}"
+                    #     )
                 elif ratio21 > 0.3 and ratio31<0.1:
                     normal = vh[-1, :]  # Plane normal vector
                     valid_associations.append(('plane', point_lidar, center, normal))
-                    if DEBUG_LIDAR:
-                        print("Singular Values for plane:", s)
-                        print(
-                            f"PLANE: s={s}, "
-                            f"s1/s0={ratio21:.3f}, "
-                            f"s2/s0={ratio31:.3f}"
-                        )
+                    # if DEBUG_LIDAR:
+                    #     print("Singular Values for plane:", s)
+                    #     print(
+                    #         f"PLANE: s={s}, "
+                    #         f"s1/s0={ratio21:.3f}, "
+                    #         f"s2/s0={ratio31:.3f}"
+                    #     )
                 else:
-                    if DEBUG_LIDAR:
-                        print(
-                            f"REJECT: s={s}, "
-                            f"s1/s0={ratio21:.3f}, "
-                            f"s2/s0={ratio31:.3f}"
-                        )
+                    # if DEBUG_LIDAR:
+                    #     print(
+                    #         f"REJECT: s={s}, "
+                    #         f"s1/s0={ratio21:.3f}, "
+                    #         f"s2/s0={ratio31:.3f}"
+                    #     )
                     continue  # ambiguous, skip
 
             kalman_gain = None
@@ -299,7 +299,18 @@ class ESIKFStateEstimator:
                 dx = kalman_gain @ r #error-state vector
 
                 if DEBUG_LIDAR:
-                    print("State correction error norm", np.linalg.norm(dx))
+                    print(
+                        "LiDAR correction candidate:",
+                        f"iteration={iter_count + 1}",
+                        f"total={np.linalg.norm(dx):.6f}",
+                        f"rot={np.linalg.norm(dx[0:3]):.6f}",
+                        f"pos={np.linalg.norm(dx[3:6]):.6f}",
+                        f"vel={np.linalg.norm(dx[6:9]):.6f}",
+                        f"bg={np.linalg.norm(dx[9:12]):.6f}",
+                        f"ba={np.linalg.norm(dx[12:15]):.6f}",
+                        f"g={np.linalg.norm(dx[15:18]):.6f}",
+                        f"median_residual={np.median(np.abs(r)):.6f}",
+                    )
                     print("dx:", dx)
                     print("rot:", dx[:3])
                     print("pos:", dx[3:6])
@@ -334,6 +345,16 @@ class ESIKFStateEstimator:
                 state.ba += dx[12:15]
                 state.g  += dx[15:18]
                 correction_applied = True
+                if DEBUG_LIDAR:
+                    print(
+                        "LiDAR correction committed:",
+                        f"position={state.p}",
+                        f"bg={state.bg}",
+                        f"ba={state.ba}",
+                        f"g={state.g}",
+                        f"R_error={np.linalg.norm(state.R.T @ state.R - np.eye(3)):.3e}",
+                        f"det_R={np.linalg.det(state.R):.12f}",
+                    )
 
             #Prevent crash when there is no LiDAR update
             if correction_applied and kalman_gain is not None and H is not None:
@@ -367,6 +388,18 @@ class ESIKFStateEstimator:
         K = self.P @ H.T @ np.linalg.inv(S)
         dx = K @ r
 
+        if DEBUG_LIDAR:
+            print(
+                "ZUPT correction candidate:",
+                f"velocity={np.linalg.norm(r):.6f}",
+                f"rot={np.linalg.norm(dx[0:3]):.6f}",
+                f"pos={np.linalg.norm(dx[3:6]):.6f}",
+                f"vel={np.linalg.norm(dx[6:9]):.6f}",
+                f"bg={np.linalg.norm(dx[9:12]):.6f}",
+                f"ba={np.linalg.norm(dx[12:15]):.6f}",
+                f"g={np.linalg.norm(dx[15:18]):.6f}",
+            )
+
         theta_rot = dx[0:3]
         state.R = state.R @ exp(theta_rot)
         state.p  += dx[3:6]
@@ -377,3 +410,15 @@ class ESIKFStateEstimator:
 
         I = np.eye(18)
         self.P = (I - K @ H) @ self.P
+
+        if DEBUG_LIDAR:
+            print(
+                "ZUPT correction committed:",
+                f"position={state.p}",
+                f"velocity={state.v}",
+                f"bg={state.bg}",
+                f"ba={state.ba}",
+                f"g={state.g}",
+                f"R_error={np.linalg.norm(state.R.T @ state.R - np.eye(3)):.3e}",
+                f"det_R={np.linalg.det(state.R):.12f}",
+            )
