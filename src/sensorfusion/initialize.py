@@ -81,7 +81,7 @@ class IMU:
         """
         #Find the initial rotation matrix from the IMU readings
         #Collect 5s of IMU data to get the mean acceleration
-        self.wait_for_calibration()
+        #self.wait_for_calibration()
         time.sleep(5) #after calibration wait for the sensor to be placed static
         curr_time = time.monotonic()
         # accel_data = []

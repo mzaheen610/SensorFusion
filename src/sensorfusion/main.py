@@ -101,7 +101,14 @@ if __name__ == "__main__":
     filter.state.R, filter.state.bg, filter.state.ba = imu.initialize_rotation_gyro()
     # filter.state.ba = np.zeros(3)
     filter.state.g = np.zeros(3)  #gravity is already removed by the chip's linear_acceleration output; don't subtract it again
-    initial_covariance = 100 * np.eye(18)
+    initial_covariance = np.diag([
+    0.05**2, 0.05**2, 0.05**2,       # rotation
+    0.10**2, 0.10**2, 0.10**2,       # position
+    0.20**2, 0.20**2, 0.20**2,       # velocity
+    0.01**2, 0.01**2, 0.01**2,       # gyro bias
+    0.05**2, 0.05**2, 0.05**2,       # accel bias
+    0.05**2, 0.05**2, 0.05**2,       # gravity residual
+])
     filter.P = initial_covariance
 
     print("Initial R:")
