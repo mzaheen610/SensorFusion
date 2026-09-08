@@ -7,7 +7,7 @@ import socket
 import struct
 import pickle
 
-def receive_stream(robot_ip="10.31.132.214", port=5000):
+def receive_stream(robot_ip="10.65.123.214", port=5000):
     client = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     print(f"Connecting to Robot at {robot_ip}:{port}...")
     client.connect((robot_ip, port))
@@ -113,4 +113,4 @@ def receive_stream(robot_ip="10.31.132.214", port=5000):
         client.close()
 
 if __name__ == "__main__":
-    receive_stream(robot_ip="10.31.132.214", port=5000)
+    receive_stream(robot_ip="10.65.123.214", port=5000)

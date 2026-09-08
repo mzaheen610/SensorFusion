@@ -251,8 +251,8 @@ class ESIKFStateEstimator:
                         res = float(np.linalg.norm(perp))
                         normal = perp / (res + 1e-9)  # "normal" here is the residual direction for the Jacobian
 
-                    #reject large residuals
-                    if abs(res) > 0.80:
+                    # Keep a lenient metric gate while rejecting unrelated surfaces.
+                    if abs(res) > 0.20:
                         continue
                     # if DEBUG_LIDAR:
                     #     print("Plane residual:", res)
@@ -310,10 +310,20 @@ class ESIKFStateEstimator:
                 if np.linalg.norm(dx) < eps:
                     break
 
-                MAX_CORRECTION_NORM = 2.0  # to be tuned based on realistic per-update movement of platform
-                if not np.all(np.isfinite(dx)) or np.linalg.norm(dx) > MAX_CORRECTION_NORM:
+                max_rotation_correction = np.deg2rad(15.0)
+                max_position_correction = 1.0
+                if (
+                    not np.all(np.isfinite(dx))
+                    or np.linalg.norm(dx[0:3]) > max_rotation_correction
+                    or np.linalg.norm(dx[3:6]) > max_position_correction
+                ):
                     if DEBUG_LIDAR:
-                        print(f"Rejecting implausible correction, norm={np.linalg.norm(dx)}")
+                        print(
+                            "Rejecting implausible correction: "
+                            f"rotation={np.linalg.norm(dx[0:3]):.3f} "
+                            f"position={np.linalg.norm(dx[3:6]):.3f}"
+                        )
+                    correction_applied = False
                     break
 
                 theta_rot = dx[0:3]

@@ -99,26 +99,29 @@ def lidar_thread(state_lock, buffer_lock, filter, map, imu_measurement_buffer,
         try:
             scan_timestamp, scan = scan_queue.get()
 
-            with state_lock:
-                P_copy = copy.deepcopy(filter.P)
-            with buffer_lock:
-                imu_buffer = list(imu_measurement_buffer)
-                state_history = list(imu_state_buffer)
-
-            if not state_history:
-                continue
-            state_timestamp, state = min(
-                state_history,
-                key=lambda item: abs(item[0] - scan_timestamp),
-            )
-            if abs(state_timestamp - scan_timestamp) > 0.1:
+            if time.monotonic() - scan_timestamp > 0.25:
                 if DEBUG_LIDAR:
                     print(
-                        f"LiDAR compensation skipped: scan_age="
-                        f"{abs(state_timestamp - scan_timestamp):.3f}s",
+                        f"LiDAR compensation skipped: processing_age="
+                        f"{time.monotonic() - scan_timestamp:.3f}s",
                         flush=True,
                     )
+                lidar_prev_scan_time["time"] = scan_timestamp
                 continue
+
+            with buffer_lock:
+                imu_buffer = list(imu_measurement_buffer)
+                state_item = next(
+                    (
+                        item for item in reversed(imu_state_buffer)
+                        if item[0] <= scan_timestamp
+                    ),
+                    None,
+                )
+
+            if state_item is None:
+                continue
+            state_timestamp, state, P_copy = state_item
 
             # Keep the exact pre-update snapshot so only the correction delta can
             # be merged into the latest state that IMU prediction advances.
@@ -185,7 +188,7 @@ def lidar_thread(state_lock, buffer_lock, filter, map, imu_measurement_buffer,
                     filter.state.ba = state.ba
                     filter.state.g = state.g
                     filter.P = P_new
-                if points_world is not None:
+                if points_world is not None and update_applied:
                     map.add_points(points_world)
 
                 # --- ZUPT check  ---

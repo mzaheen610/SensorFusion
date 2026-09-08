@@ -66,8 +66,15 @@ def imu_thread(imu, filter_ref):
 
         with state_lock:
             state, cov = filter_ref.predict((gyro, accel), dt)
-            imu_state = (now, copy.deepcopy(state)) #store the timestamp and state for backpropogation of LiDAR points
+            imu_state = (
+                now,
+                copy.deepcopy(state),
+                copy.deepcopy(cov),
+            )
+        with buffer_lock:
             imu_state_buffer.append(imu_state)
+            while imu_measurement_buffer and now - imu_measurement_buffer[0][0] > 2.0:
+                imu_measurement_buffer.popleft()
 
         prediction_count += 1
         report_time = time.monotonic()
@@ -95,6 +102,7 @@ if __name__ == "__main__":
     # filter.state.ba = np.zeros(3)
     filter.state.g = np.zeros(3)  #gravity is already removed by the chip's linear_acceleration output; don't subtract it again
     initial_covariance = 100 * np.eye(18)
+    filter.P = initial_covariance
 
     print("Initial R:")
     print(filter.state.R)

@@ -71,8 +71,8 @@ class BackpropTests(unittest.TestCase):
             0.0,
         ])
         expected_second = np.array([
-            -np.cos(0.045 * np.pi),
-            -np.sin(0.045 * np.pi),
+            -1.0,
+            0.0,
             0.0,
         ])
 

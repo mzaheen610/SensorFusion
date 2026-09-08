@@ -71,8 +71,9 @@ class Map:
             current_points = voxel["lidar"]
 
         if len(current_points) >= min_points_in_voxel:
-            pts = current_points[:min_points_in_voxel * 2] #limit the number of points
-            return np.array(pts)
+            neighbors = np.asarray(current_points)
+            distances = np.linalg.norm(neighbors - np.asarray(point), axis=1)
+            return neighbors[np.argsort(distances)[:min_points_in_voxel * 2]]
 
         neighbors = list(current_points)
         for dx in range(-radius_voxels, radius_voxels + 1):
@@ -89,7 +90,9 @@ class Map:
         if len(neighbors) == 0:
             return None
 
-        return np.array(neighbors)
+        neighbors = np.asarray(neighbors)
+        distances = np.linalg.norm(neighbors - np.asarray(point), axis=1)
+        return neighbors[np.argsort(distances)[:min_points_in_voxel * 2]]
     
     def get_voxel_key(self, point):
         #get the root voxel key since the voxel is 0.5x0.5x0.5 cube and multiple points could belong to the same voxel

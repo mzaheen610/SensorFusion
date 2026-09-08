@@ -82,10 +82,9 @@ def backprop(scan_end_time, prev_scan_time, imu_pose, scan, imu_measurement_buff
 
     trajectory = build_backward_trajectory(scan_end_time, imu_pose, imu_measurement_buffer, min_point_time)
     # angular_rate_lidar = 2 * pi * 10 # 10Hz LiDAR scan frequency
-    for point in scan:
+    for index, point in enumerate(scan):
         #Find the delta time between scan end and the point sampled time
-        # point_time = point[1] / angular_rate_lidar
-        point_time = (point[1] / 360.0) * scan_period
+        point_time = (index / max(len(scan) - 1, 1)) * scan_period
         point_abs_time = prev_scan_time + point_time
 
         #Find the closest pose in trajectory and interpolate
