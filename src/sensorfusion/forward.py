@@ -7,6 +7,7 @@ from dataclasses import dataclass
 from utils.so3_rotation import exp, skew
 import numpy as np
 from utils.projections import project_points_world
+from lidar.update import copy_state, state_error
 # Per-point logging is extremely expensive on a Raspberry Pi. Enable only when
 # diagnosing a specific scan.
 DEBUG_LIDAR = True
@@ -226,6 +227,11 @@ class ESIKFStateEstimator:
             max_iterations = 5
             P_inv = np.linalg.inv(P_copy)
 
+            state_0 = copy_state(state)
+            prev_residual_norm = None
+            best_state = None
+            best_residual_norm = None
+
             # --- ITERATED EKF UPDATE ---
             for iter_count in range(max_iterations):
                 H_list = []
@@ -288,6 +294,14 @@ class ESIKFStateEstimator:
                 self.last_lidar_residual_count = len(r)
                 self.last_lidar_residual_norm = float(np.linalg.norm(r))
 
+                residual_norm = self.last_lidar_residual_norm
+                if prev_residual_norm is not None and residual_norm > prev_residual_norm:
+                    if DEBUG_LIDAR:
+                        print(
+                            f"Residual increased ({residual_norm:.6f} > {prev_residual_norm:.6f}); "
+                        )
+                    break
+                prev_residual_norm = residual_norm
                 if DEBUG_LIDAR:
                     print("Residual norm", np.linalg.norm(r))
 
@@ -296,7 +310,9 @@ class ESIKFStateEstimator:
                 R_inv = (1.0 / sigma_lidar**2) * np.eye(len(r)) 
                 kalman_gain = np.linalg.inv(H.T @ R_inv @ H + P_inv) @ (H.T @ R_inv)
 
-                dx = kalman_gain @ r #error-state vector
+                # dx = kalman_gain @ r #error-state vector
+                dx_from_prior = state_error(state, state_0)
+                dx = kalman_gain @ r - (np.eye(18) - kalman_gain @ H) @ dx_from_prior
 
                 if DEBUG_LIDAR:
                     print(
@@ -345,6 +361,9 @@ class ESIKFStateEstimator:
                 state.ba += dx[12:15]
                 state.g  += dx[15:18]
                 correction_applied = True
+                if best_residual_norm is None or residual_norm < best_residual_norm:
+                    best_residual_norm = residual_norm
+                    best_state = copy_state(state)
                 if DEBUG_LIDAR:
                     print(
                         "LiDAR correction committed:",
@@ -355,7 +374,13 @@ class ESIKFStateEstimator:
                         f"R_error={np.linalg.norm(state.R.T @ state.R - np.eye(3)):.3e}",
                         f"det_R={np.linalg.det(state.R):.12f}",
                     )
-
+            if correction_applied and best_state is not None:
+                state.R = best_state.R
+                state.p = best_state.p
+                state.v = best_state.v
+                state.bg = best_state.bg
+                state.ba = best_state.ba
+                state.g = best_state.g
             #Prevent crash when there is no LiDAR update
             if correction_applied and kalman_gain is not None and H is not None:
                 I = np.eye(P_copy.shape[0])

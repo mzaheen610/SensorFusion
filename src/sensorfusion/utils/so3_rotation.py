@@ -37,3 +37,38 @@ def exp(delta_theta):
         return delta_R
     else: #to avoid division by 0 
         return np.eye(3)
+
+def log(R):
+    """
+    Inverse of exp(): SO(3) --> logarithm map
+    Calculates the axis-angle from the given rotation matrix"""
+    cos_angle = (np.trace(R) - 1.0) / 2.0
+    cos_angle = np.clip(cos_angle, -1.0, 1.0)
+    angle = np.arccos(cos_angle)
+    #small-angle approximation.
+    if angle < 1e-8:
+        return np.array([
+            R[2, 1] - R[1, 2],
+            R[0, 2] - R[2, 0],
+            R[1, 0] - R[0, 1],
+        ]) / 2.0
+
+    # Near-pi rotation: sin(angle) is close to zero 
+    if np.pi - angle < 1e-6:
+        B = (R + np.eye(3)) / 2.0
+        axis = np.sqrt(np.clip(np.diag(B), 0.0, None))
+        if B[0, 1] < 0:
+            axis[1] = -axis[1]
+        if B[0, 2] < 0:
+            axis[2] = -axis[2]
+        if axis[1] * axis[2] * B[1, 2] < 0:
+            axis[2] = -axis[2]
+        return axis * angle
+
+    # General case: standard closed-form log map.
+    vec = np.array([
+        R[2, 1] - R[1, 2],
+        R[0, 2] - R[2, 0],
+        R[1, 0] - R[0, 1],
+    ])
+    return (angle / (2.0 * np.sin(angle))) * vec

@@ -7,7 +7,8 @@ import numpy as np
 from queue import Empty, Full
 from lidar.backward import backprop
 from utils.similarity import scan_similarity, scan_to_bins
-
+from forward import State
+from utils.so3_rotation import log
 # Set to True when inspecting individual scans. Keep False during normal runs
 # because console I/O can noticeably reduce throughput on a Raspberry Pi.
 DEBUG_LIDAR = True
@@ -248,3 +249,26 @@ def lidar_thread(state_lock, buffer_lock, filter, map, imu_measurement_buffer,
         except Exception as e:
             print(f"[lidar_thread] FATAL: {type(e).__name__}: {e}", flush=True)
             continue
+
+def copy_state(state):
+    # deep  copy of the mutable State fields
+    return State(
+        R=state.R.copy(),
+        p=state.p.copy(),
+        v=state.v.copy(),
+        bg=state.bg.copy(),
+        ba=state.ba.copy(),
+        g=state.g.copy(),
+    )
+
+def state_error(state, state_ref):
+    # Builds the 18-dim error-state of `state` relative to `state_ref`, in the
+    rot_err = log(state_ref.R.T @ state.R)
+    return np.concatenate([
+        rot_err,
+        state.p - state_ref.p,
+        state.v - state_ref.v,
+        state.bg - state_ref.bg,
+        state.ba - state_ref.ba,
+        state.g - state_ref.g,
+    ])
