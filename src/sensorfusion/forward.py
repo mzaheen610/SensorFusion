@@ -157,6 +157,7 @@ class ESIKFStateEstimator:
 
             # --- PRE-COMPUTE DATA ASSOCIATIONS ONCE ---
             valid_associations = []
+            association_voxels = set()
             T_GI_init = np.eye(4)
             T_GI_init[:3, :3] = state.R
             T_GI_init[:3, 3] = state.p
@@ -165,6 +166,8 @@ class ESIKFStateEstimator:
                 # Transform each point from lidar frame to the world frame based on current pose
                 point = T_GI_init @ lidar_imu_extrinsic @ np.append(point_lidar, 1)
                 point_world_coords = point[:3]
+
+                association_key = map.get_voxel_key(point_world_coords)
 
                 #find the k nearest points from the global map and fit a plane
                 # 4. Fit a plane using SVD
@@ -194,6 +197,9 @@ class ESIKFStateEstimator:
                 if ratio21 < 0.15:  # optional stricter check, or just an else
                     # Edge/line feature: store direction to calculate dynamic residual later
                     direction = vh[0, :]  # principal direction of the line
+                    if association_key in association_voxels:
+                        continue
+                    association_voxels.add(association_key)
                     valid_associations.append(('line', point_lidar, center, direction))
                     if DEBUG_LIDAR:
                         print(
@@ -203,6 +209,13 @@ class ESIKFStateEstimator:
                         )
                 elif ratio21 > 0.3 and ratio31<0.1:
                     normal = vh[-1, :]  # Plane normal vector
+                    # A horizontal 2D LiDAR slice does not provide a useful
+                    # horizontal pose constraint from a near-vertical normal.
+                    if abs(normal[2]) > 0.9:
+                        continue
+                    if association_key in association_voxels:
+                        continue
+                    association_voxels.add(association_key)
                     valid_associations.append(('plane', point_lidar, center, normal))
                     if DEBUG_LIDAR:
                         print("Singular Values for plane:", s)
@@ -231,6 +244,9 @@ class ESIKFStateEstimator:
             prev_residual_norm = None
             best_state = None
             best_residual_norm = None
+            best_H = None
+            best_kalman_gain = None
+            best_P_new = P_copy
 
             # --- ITERATED EKF UPDATE ---
             for iter_count in range(max_iterations):
@@ -364,6 +380,9 @@ class ESIKFStateEstimator:
                 if best_residual_norm is None or residual_norm < best_residual_norm:
                     best_residual_norm = residual_norm
                     best_state = copy_state(state)
+                    best_H = H.copy()
+                    best_kalman_gain = kalman_gain.copy()
+                    best_P_new = (np.eye(P_copy.shape[0]) - kalman_gain @ H) @ P_copy
                 if DEBUG_LIDAR:
                     print(
                         "LiDAR correction committed:",
@@ -382,9 +401,8 @@ class ESIKFStateEstimator:
                 state.ba = best_state.ba
                 state.g = best_state.g
             #Prevent crash when there is no LiDAR update
-            if correction_applied and kalman_gain is not None and H is not None:
-                I = np.eye(P_copy.shape[0])
-                P_new = (I - kalman_gain @ H) @ P_copy #covariance update
+            if correction_applied and best_kalman_gain is not None and best_H is not None:
+                P_new = best_P_new
                 self.last_lidar_update_applied = True
 
             # Generate final world points for the map using the converged state

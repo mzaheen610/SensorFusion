@@ -184,9 +184,9 @@ def lidar_thread(state_lock, buffer_lock, filter, map, imu_measurement_buffer,
                     filter.state.p += delta_p
                     filter.state.v += delta_v
                     filter.state.R = filter.state.R @ delta_R
-                    filter.state.bg = state.bg
-                    filter.state.ba = state.ba
-                    filter.state.g = state.g
+                    filter.state.bg += state.bg - state_old.bg
+                    filter.state.ba += state.ba - state_old.ba
+                    filter.state.g += state.g - state_old.g
                     filter.P = P_new
                     if DEBUG_LIDAR:
                         print(
