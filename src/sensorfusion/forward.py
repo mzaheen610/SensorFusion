@@ -195,29 +195,29 @@ class ESIKFStateEstimator:
                     # Edge/line feature: store direction to calculate dynamic residual later
                     direction = vh[0, :]  # principal direction of the line
                     valid_associations.append(('line', point_lidar, center, direction))
-                    # if DEBUG_LIDAR:
-                    #     print(
-                    #         f"LINE: s={s}, "
-                    #         f"s1/s0={ratio21:.3f}, "
-                    #         f"s2/s0={ratio31:.3f}"
-                    #     )
+                    if DEBUG_LIDAR:
+                        print(
+                            f"LINE: s={s}, "
+                            f"s1/s0={ratio21:.3f}, "
+                            f"s2/s0={ratio31:.3f}"
+                        )
                 elif ratio21 > 0.3 and ratio31<0.1:
                     normal = vh[-1, :]  # Plane normal vector
                     valid_associations.append(('plane', point_lidar, center, normal))
-                    # if DEBUG_LIDAR:
-                    #     print("Singular Values for plane:", s)
-                    #     print(
-                    #         f"PLANE: s={s}, "
-                    #         f"s1/s0={ratio21:.3f}, "
-                    #         f"s2/s0={ratio31:.3f}"
-                    #     )
+                    if DEBUG_LIDAR:
+                        print("Singular Values for plane:", s)
+                        print(
+                            f"PLANE: s={s}, "
+                            f"s1/s0={ratio21:.3f}, "
+                            f"s2/s0={ratio31:.3f}"
+                        )
                 else:
-                    # if DEBUG_LIDAR:
-                    #     print(
-                    #         f"REJECT: s={s}, "
-                    #         f"s1/s0={ratio21:.3f}, "
-                    #         f"s2/s0={ratio31:.3f}"
-                    #     )
+                    if DEBUG_LIDAR:
+                        print(
+                            f"REJECT: s={s}, "
+                            f"s1/s0={ratio21:.3f}, "
+                            f"s2/s0={ratio31:.3f}"
+                        )
                     continue  # ambiguous, skip
 
             kalman_gain = None
@@ -258,7 +258,7 @@ class ESIKFStateEstimator:
                         normal = perp / (res + 1e-9)  # "normal" here is the residual direction for the Jacobian
 
                     # Keep a lenient metric gate while rejecting unrelated surfaces.
-                    if abs(res) > 0.20:
+                    if abs(res) > 0.10:
                         continue
                     # if DEBUG_LIDAR:
                     #     print("Plane residual:", res)
