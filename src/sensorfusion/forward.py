@@ -157,7 +157,6 @@ class ESIKFStateEstimator:
 
             # --- PRE-COMPUTE DATA ASSOCIATIONS ONCE ---
             valid_associations = []
-            association_voxels = set()
             T_GI_init = np.eye(4)
             T_GI_init[:3, :3] = state.R
             T_GI_init[:3, 3] = state.p
@@ -197,9 +196,6 @@ class ESIKFStateEstimator:
                 if ratio21 < 0.15:  # optional stricter check, or just an else
                     # Edge/line feature: store direction to calculate dynamic residual later
                     direction = vh[0, :]  # principal direction of the line
-                    if association_key in association_voxels:
-                        continue
-                    association_voxels.add(association_key)
                     valid_associations.append(('line', point_lidar, center, direction))
                     if DEBUG_LIDAR:
                         print(
@@ -213,9 +209,6 @@ class ESIKFStateEstimator:
                     # horizontal pose constraint from a near-vertical normal.
                     if abs(normal[2]) > 0.9:
                         continue
-                    if association_key in association_voxels:
-                        continue
-                    association_voxels.add(association_key)
                     valid_associations.append(('plane', point_lidar, center, normal))
                     if DEBUG_LIDAR:
                         print("Singular Values for plane:", s)
