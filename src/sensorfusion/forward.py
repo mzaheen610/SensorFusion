@@ -193,7 +193,7 @@ class ESIKFStateEstimator:
                 ratio31 = s[2] / (s[0] + 1e-9)  # smallest spread / largest spread
 
 
-                if ratio21 < 0.15:  # optional stricter check, or just an else
+                if ratio21 < 0.3:  # optional stricter check, or just an else
                     # Edge/line feature: store direction to calculate dynamic residual later
                     direction = vh[0, :]  # principal direction of the line
                     valid_associations.append(('line', point_lidar, center, direction))
