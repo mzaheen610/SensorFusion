@@ -352,16 +352,19 @@ class ESIKFStateEstimator:
 
                 max_rotation_correction = np.deg2rad(15.0)
                 max_position_correction = 1.0
+                max_velocity_correction = 0.3 #m/s tune to the platforms max vel
                 if (
                     not np.all(np.isfinite(dx))
                     or np.linalg.norm(dx[0:3]) > max_rotation_correction
                     or np.linalg.norm(dx[3:6]) > max_position_correction
+                    or np.linalg.norm(dx[6:9]) > max_velocity_correction
                 ):
                     if DEBUG_LIDAR:
                         print(
                             "Rejecting implausible correction: "
                             f"rotation={np.linalg.norm(dx[0:3]):.3f} "
                             f"position={np.linalg.norm(dx[3:6]):.3f}"
+                            f"velocity={np.linalg.norm(dx[6:9]):.3f}"
                         )
                     correction_applied = False
                     break
@@ -431,6 +434,25 @@ class ESIKFStateEstimator:
         K = self.P @ H.T @ np.linalg.inv(S)
         dx = K @ r
 
+
+        max_rotation_correction = np.deg2rad(15.0)
+        max_position_correction = 1.0
+        max_velocity_correction = 0.3 #m/s tune to the platforms max vel
+        if (
+            not np.all(np.isfinite(dx))
+            or np.linalg.norm(dx[0:3]) > max_rotation_correction
+            or np.linalg.norm(dx[3:6]) > max_position_correction
+            or np.linalg.norm(dx[6:9]) > max_velocity_correction
+        ):
+            if DEBUG_LIDAR:
+                print(
+                    "Rejecting implausible correction: "
+                    f"rotation={np.linalg.norm(dx[0:3]):.3f} "
+                    f"position={np.linalg.norm(dx[3:6]):.3f}"
+                    f"velocity={np.linalg.norm(dx[6:9]):.3f}"
+                )
+            return
+        
         if DEBUG_LIDAR:
             print(
                 "ZUPT correction candidate:",
