@@ -266,13 +266,7 @@ class ESIKFStateEstimator:
                         res = float(np.linalg.norm(perp))
                         normal = perp / (res + 1e-9)  # "normal" here is the residual direction for the Jacobian
 
-                    # Keep a lenient metric gate while rejecting unrelated surfaces.
-                    if abs(res) > 0.10:
-                        continue
-                    # if DEBUG_LIDAR:
-                    #     print("Plane residual:", res)
-                        
-                    residuals.append(res)
+
                     #lidar jacobian computation
                     H_pos = normal.T
                     H_rot = -normal @ state.R @ skew(point_lidar)
@@ -283,7 +277,17 @@ class ESIKFStateEstimator:
                         np.zeros(3),  # gyro bias
                         np.zeros(3),  # accel bias
                         np.zeros(3),  # gravity  
-                    ])      
+                    ])
+                    # Compute a dynamic residual gate based on pose uncertainity
+                    innovation_var = H_k @ P_copy @ H_k.T + sigma_lidar**2
+                    k=3
+                    gate = k * np.sqrt(innovation_var)   # k ≈ 3 for a ~99.7% confidence gate
+                    print("Residual gate value:", gate)
+                    if abs(res) > gate:
+                        continue
+                    # if DEBUG_LIDAR:
+                    #     print("Plane residual:", res)
+                    residuals.append(res)
                     H_list.append(H_k)
 
                 if len(H_list) == 0:
