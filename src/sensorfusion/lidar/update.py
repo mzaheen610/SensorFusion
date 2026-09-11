@@ -94,7 +94,7 @@ def lidar_thread(state_lock, buffer_lock, filter, map, imu_measurement_buffer,
     prev_scan_bins = None
     static_count = 0
     ZUPT_CONSECUTIVE_REQUIRED = 5
-    ZUPT_DIST_THRESHOLD_MM = 15 #mm
+    ZUPT_DIST_THRESHOLD_MM = 50 #mm
     while True:
         try:
             scan_timestamp, scan = scan_queue.get()
