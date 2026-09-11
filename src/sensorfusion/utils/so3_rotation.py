@@ -72,3 +72,11 @@ def log(R):
         R[1, 0] - R[0, 1],
     ])
     return (angle / (2.0 * np.sin(angle))) * vec
+
+def reorthonormalize(R):
+    U, _, Vt = np.linalg.svd(R)
+    R_fixed = U @ Vt
+    if np.linalg.det(R_fixed) < 0:
+        U[:, -1] *= -1
+        R_fixed = U @ Vt
+    return R_fixed

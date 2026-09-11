@@ -201,8 +201,9 @@ def lidar_thread(state_lock, buffer_lock, filter, map, imu_measurement_buffer,
                             f"det_R={np.linalg.det(filter.state.R):.12f}",
                             flush=True,
                         )
-                # if points_world is not None and update_applied:
-                if points_world is not None:
+                #dont add points to the map when the update was not applied
+                if points_world is not None and update_applied:
+                # if points_world is not None:
                     map.add_points(points_world)
 
                 # --- ZUPT check  ---

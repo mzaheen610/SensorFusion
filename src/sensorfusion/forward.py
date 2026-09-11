@@ -4,7 +4,7 @@ IMU integration
 """
 #IMU used is BNO055, Lidar is RPLidar A2M12, Camera is PiCamZero
 from dataclasses import dataclass
-from utils.so3_rotation import exp, skew
+from utils.so3_rotation import exp, skew, reorthonormalize
 import numpy as np
 from utils.projections import project_points_world
 from lidar.update import copy_state, state_error
@@ -98,6 +98,7 @@ class ESIKFStateEstimator:
         delta_theta = ang_act * dt
         delta_R = exp(delta_theta)
         self.state.R = self.state.R @ delta_R  #del_theta = w*del_t --> converted to proper SO(3) before adding to the rotation matrix(SO(3))
+        self.state.R = reorthonormalize(self.state.R) # prevent det(R) runaway
         self.state.p += (self.state.v * dt) + (0.5 * accel * dt * dt) 
         self.state.v += accel * dt
 
@@ -283,7 +284,8 @@ class ESIKFStateEstimator:
                     innovation_var = H_k @ P_copy @ H_k.T + sigma_lidar**2
                     k=3
                     gate = max(0.15, k * np.sqrt(innovation_var))   # k ≈ 3 for a ~99.7% confidence gate
-                    print("Residual gate value:", gate)
+                    if DEBUG_LIDAR:
+                        print("Residual gate value:", gate)
                     if abs(res) > gate:
                         continue
                     # if DEBUG_LIDAR:
@@ -371,6 +373,7 @@ class ESIKFStateEstimator:
 
                 theta_rot = dx[0:3]
                 state.R = state.R @ exp(theta_rot)
+                state.R = reorthonormalize(state.R)   # normalize the R matrix to prevent 
                 state.p  += dx[3:6]
                 state.v  += dx[6:9]
                 state.bg += dx[9:12]
@@ -467,6 +470,7 @@ class ESIKFStateEstimator:
 
         theta_rot = dx[0:3]
         state.R = state.R @ exp(theta_rot)
+        state.R = reorthonormalize(state.R)
         state.p  += dx[3:6]
         state.v  += dx[6:9]
         state.bg += dx[9:12]
