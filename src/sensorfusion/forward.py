@@ -228,6 +228,7 @@ class ESIKFStateEstimator:
 
             kalman_gain = None
             H = None
+            sigma_lidar = 0.02
             correction_applied = False
             self.last_lidar_association_count = len(valid_associations)
             max_iterations = 5
@@ -318,7 +319,6 @@ class ESIKFStateEstimator:
                 if DEBUG_LIDAR:
                     print("Residual norm", np.linalg.norm(r))
 
-                sigma_lidar = 0.02
 
                 R_inv = (1.0 / sigma_lidar**2) * np.eye(len(r)) 
                 kalman_gain = np.linalg.inv(H.T @ R_inv @ H + P_inv) @ (H.T @ R_inv)
