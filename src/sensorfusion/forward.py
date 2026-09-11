@@ -282,7 +282,7 @@ class ESIKFStateEstimator:
                     # Compute a dynamic residual gate based on pose uncertainity
                     innovation_var = H_k @ P_copy @ H_k.T + sigma_lidar**2
                     k=3
-                    gate = k * np.sqrt(innovation_var)   # k ≈ 3 for a ~99.7% confidence gate
+                    gate = max(0.15, k * np.sqrt(innovation_var))   # k ≈ 3 for a ~99.7% confidence gate
                     print("Residual gate value:", gate)
                     if abs(res) > gate:
                         continue
@@ -379,7 +379,10 @@ class ESIKFStateEstimator:
                     best_state = copy_state(state)
                     best_H = H.copy()
                     best_kalman_gain = kalman_gain.copy()
-                    best_P_new = (np.eye(P_copy.shape[0]) - kalman_gain @ H) @ P_copy
+                    # best_P_new = (np.eye(P_copy.shape[0]) - kalman_gain @ H) @ 
+                    #Joseph form covariance update to prevent collapse of P
+                    I_KH = np.eye(P_copy.shape[0]) - kalman_gain @ H
+                    best_P_new = I_KH @ P_copy @ I_KH.T + kalman_gain @ (sigma_lidar**2 * np.eye(len(r))) @ kalman_gain.T
                 if DEBUG_LIDAR:
                     print(
                         "LiDAR correction committed:",
