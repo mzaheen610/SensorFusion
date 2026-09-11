@@ -193,6 +193,10 @@ if __name__ == "__main__":
 
     while(True):
         now = time.monotonic()
+        #Apply 2D constraint since lidar cannot observe the Z axis
+        with state_lock:
+            filter.state.p[2] = 0.0
+            filter.state.v[2] = 0.0
         if now - prev_time >= 1:
             prev_time = now
             with state_lock:
