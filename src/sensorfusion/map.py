@@ -98,42 +98,69 @@ class Map:
         #get the root voxel key since the voxel is 0.5x0.5x0.5 cube and multiple points could belong to the same voxel
         return tuple(np.floor(point/self.voxel_size))
     
+    # def query_visible_voxels(self, current_scan, state):
+    #     #find the voxels in the map nearest to the measured points
+    #     #filter based on the camera field of view projected into the lidar FOV
+    #     if current_scan is None:
+    #         return []
+    #     #points should be backpropogated and transformed to the world coordinates
+    #     #search for points within the Camera x Lidar FOV limits
+    #     lidar_range = 12
+    #     theta = np.deg2rad(31) #half of camera horizontal range
+    #     alpha = np.deg2rad(24) #half of camera vertical range
+
+    #     rcos_theta = lidar_range* np.cos(theta)
+    #     rsin_theta = lidar_range* np.sin(theta)
+    #     rcos_alpha = lidar_range* np.cos(alpha)
+    #     rsin_alpha = lidar_range* np.sin(alpha)
+
+    #     current_scan = np.asarray(current_scan)
+    #     # Rotate world-frame points into the robot's local frame so the FOV
+    #     # box applies directly.
+    #     local_points = (current_scan - state.p) @ state.R  # state.R.T @ (p - state.p), vectorized
+
+    #     visible_points = []
+    #     for point, local in zip(current_scan, local_points):
+    #         x, y, z = local
+    #         if -rsin_theta < x < rsin_theta:
+    #             if 0 < y < rcos_alpha:
+    #                 if -rsin_alpha < z < rsin_alpha:
+    #                     visible_points.append(point)
+
+    #     visual_map_points = []
+    #     for point in visible_points:
+    #         voxel_points = self.query(point)
+    #         if voxel_points is None:
+    #             continue
+    #         visual_map_points.extend(voxel_points)
+    #     return visual_map_points
     def query_visible_voxels(self, current_scan, state):
-        #find the voxels in the map nearest to the measured points
-        #filter based on the camera field of view projected into the lidar FOV
-        if current_scan is None:
+        if not self.voxel_map:
             return []
-        #points should be backpropogated and transformed to the world coordinates
-        #search for points within the Camera x Lidar FOV limits
-        lidar_range = 12
-        theta = np.deg2rad(31) #half of camera horizontal range
-        alpha = np.deg2rad(24) #half of camera vertical range
-
-        rcos_theta = lidar_range* np.cos(theta)
-        rsin_theta = lidar_range* np.sin(theta)
-        rcos_alpha = lidar_range* np.cos(alpha)
-        rsin_alpha = lidar_range* np.sin(alpha)
-
-        current_scan = np.asarray(current_scan)
-        # Rotate world-frame points into the robot's local frame so the FOV
-        # box applies directly.
-        local_points = (current_scan - state.p) @ state.R  # state.R.T @ (p - state.p), vectorized
 
         visible_points = []
-        for point, local in zip(current_scan, local_points):
-            x, y, z = local
-            if -rsin_theta < x < rsin_theta:
-                if 0 < y < rcos_alpha:
-                    if -rsin_alpha < z < rsin_alpha:
-                        visible_points.append(point)
+        robot_pos = state.p
+        # Find the robot's forward direction in the world frame 
+        # (Assuming IMU X-axis is the forward direction)
+        forward_vector = state.R @ np.array([1.0, 0.0, 0.0])
 
-        visual_map_points = []
-        for point in visible_points:
-            voxel_points = self.query(point)
-            if voxel_points is None:
+        for key, voxel in self.voxel_map.items():
+            if not voxel["lidar"]:
                 continue
-            visual_map_points.extend(voxel_points)
-        return visual_map_points
+            # Approximate the center coordinate of this voxel
+            voxel_center = np.array(key) * self.voxel_size + (self.voxel_size / 2.0)
+            vector_to_voxel = voxel_center - robot_pos
+            distance = np.linalg.norm(vector_to_voxel)
+
+            #Filter by max LiDAR distance
+            if distance < 12.0:
+                # 2. Is it in front of the robot? 
+                # A dot product > -0.2 gives us a nice wide 180+ degree hemisphere in front of the robot.
+                # The exact camera FOV bounds will be handled safely by project_points_to_frame.
+                if distance < self.voxel_size or np.dot(vector_to_voxel / distance, forward_vector) > -0.2:
+                    visible_points.extend(voxel["lidar"])
+
+        return visible_points
     
     def add_visual_patch(self, point, patch):
         #add/attach the visual patch to the lidar point in the global map
