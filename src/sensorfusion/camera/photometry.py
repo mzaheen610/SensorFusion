@@ -21,6 +21,10 @@ def camera_thread(cam, state_lock, buffer_lock, filter, map, imu_state_buffer, c
         if frame is None:
             time.sleep(0.01)
             continue
+
+        # Resize the frame to 640x480 for fast Pi processing and correct math
+        frame = cv2.resize(frame, (640, 480))
+        
         display_frame = frame.copy()
         #Get the latest compensated lidar scan from the camera queue
         try:
@@ -76,7 +80,7 @@ def camera_thread(cam, state_lock, buffer_lock, filter, map, imu_state_buffer, c
             visual_map_points, T_CI, T_GI
         )
         print(f"DEBUG: Found {len(visual_map_points)} voxels, {len(projected_points_pixels)} projected onto image")
-        
+
         residual_list =[]
         H_rows = []
         #get the 8x8 pixel patch surrounding the current lidar point
