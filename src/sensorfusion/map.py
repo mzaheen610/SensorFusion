@@ -111,26 +111,28 @@ class Map:
 
         rcos_theta = lidar_range* np.cos(theta)
         rsin_theta = lidar_range* np.sin(theta)
-
         rcos_alpha = lidar_range* np.cos(alpha)
         rsin_alpha = lidar_range* np.sin(alpha)
 
-        current_pose = state.p
-        x = current_pose[0]
-        y = current_pose[1]
-        z = current_pose[2]
+        current_scan = np.asarray(current_scan)
+        # Rotate world-frame points into the robot's local frame so the FOV
+        # box applies directly.
+        local_points = (current_scan - state.p) @ state.R  # state.R.T @ (p - state.p), vectorized
 
         visible_points = []
-        for point in current_scan:
-            if point[0] < x + rsin_theta and point[0] > x - rsin_theta:
-                if point[1] < y + rcos_alpha and y - point[1] > 0:
-                    if point[2] < z + rsin_alpha and point[1] > z - rsin_alpha:
+        for point, local in zip(current_scan, local_points):
+            x, y, z = local
+            if -rsin_theta < x < rsin_theta:
+                if 0 < y < rcos_alpha:
+                    if -rsin_alpha < z < rsin_alpha:
                         visible_points.append(point)
 
         visual_map_points = []
         for point in visible_points:
             voxel_points = self.query(point)
-            visual_map_points.append(voxel_points)
+            if voxel_points is None:
+                continue
+            visual_map_points.extend(voxel_points)
         return visual_map_points
     
     def add_visual_patch(self, point, patch):

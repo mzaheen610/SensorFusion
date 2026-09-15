@@ -153,7 +153,7 @@ if __name__ == "__main__":
     """
     lidar_acquisition_worker = Process(
         target=lidar_acquisition_process,
-        args=("/dev/ttyUSB0", lidar_scan_queue, camera_scan_queue),
+        args=("/dev/ttyUSB0", lidar_scan_queue),
         daemon=True,
     )
     lidar_acquisition_worker.start()
@@ -171,14 +171,14 @@ if __name__ == "__main__":
     lidar_worker = Thread(
         target=lidar_thread,
         args=(state_lock, buffer_lock, filter, map, imu_measurement_buffer,
-              imu_state_buffer, lidar_prev_scan_time, lidar_scan_queue),
+              imu_state_buffer, lidar_prev_scan_time, lidar_scan_queue, camera_scan_queue),
         daemon=True,
     )
     lidar_worker.start()
 
     camera_worker = Thread(
         target=camera_thread,
-        args=(cam, state_lock, filter, map, imu_measurement_buffer,
+        args=(cam, state_lock, buffer_lock, filter, map, imu_state_buffer,
               camera_scan_queue),
         daemon=True,
     )

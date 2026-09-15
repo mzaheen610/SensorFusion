@@ -43,16 +43,7 @@ def project(coords):
     return (u,v) #the pixel coord equivalent of the 3D points
 
 def calculate_photometric_error(curr_frame, ref_frame, pixels=None):
-    m = len(curr_frame)
-    n = len(curr_frame[0])
-    residual = []
-    #compute the photometric residual for each pixel
-    for i in range(m):
-        for j in range(n):
-            res = curr_frame[i][j] - ref_frame[i][j]
-            residual.append(res)
+    curr = np.asarray(curr_frame, dtype=np.float32)
+    ref = np.asarray(ref_frame, dtype=np.float32)
+    residual = (curr - ref).ravel().tolist()
     return residual
-
-def visual_update(frame, state):
-    #compute the visual update based on the camera scan
-    pass

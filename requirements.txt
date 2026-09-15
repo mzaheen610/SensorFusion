@@ -11,3 +11,4 @@ adafruit-blinka
 smbus2
 picamzero
 open3d
+opencv-python

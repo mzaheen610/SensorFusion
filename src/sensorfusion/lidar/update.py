@@ -52,15 +52,15 @@ def lidar_acquisition_thread(lidar, scan_queue, camera_scan_queue=None):
             except Full:
                 pass
 
-        if camera_scan_queue is not None:
-            try:
-                camera_scan_queue.put_nowait((scan_timestamp, scan))
-            except Full:
-                try:
-                    camera_scan_queue.get_nowait()
-                    camera_scan_queue.put_nowait((scan_timestamp, scan))
-                except (Empty, Full):
-                    pass
+        # if camera_scan_queue is not None:
+        #     try:
+        #         camera_scan_queue.put_nowait((scan_timestamp, scan))
+        #     except Full:
+        #         try:
+        #             camera_scan_queue.get_nowait()
+        #             camera_scan_queue.put_nowait((scan_timestamp, scan))
+        #         except (Empty, Full):
+        #             pass
 
 
 def lidar_acquisition_process(port, scan_queue, camera_scan_queue=None):
@@ -81,7 +81,7 @@ def lidar_acquisition_process(port, scan_queue, camera_scan_queue=None):
 
 
 def lidar_thread(state_lock, buffer_lock, filter, map, imu_measurement_buffer,
-                 imu_state_buffer, lidar_prev_scan_time, scan_queue):
+                 imu_state_buffer, lidar_prev_scan_time, scan_queue, camera_scan_queue=None):
     """
     Backward propogation
     """
@@ -161,6 +161,17 @@ def lidar_thread(state_lock, buffer_lock, filter, map, imu_measurement_buffer,
             points_world, update_applied, P_new = filter.lidar_update(
                 scan, state, P_copy, lidar_points_compensated, map
             )
+
+            if camera_scan_queue is not None:
+                try:
+                    camera_scan_queue.put_nowait((scan_timestamp, scan))
+                except Full:
+                    try:
+                        camera_scan_queue.get_nowait()
+                        camera_scan_queue.put_nowait((scan_timestamp, scan))
+                    except (Empty, Full):
+                        pass
+
             scan_duration = time.monotonic() - scan_start
             if DEBUG_LIDAR:
                 print(
