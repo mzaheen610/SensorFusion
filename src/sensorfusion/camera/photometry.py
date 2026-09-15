@@ -53,7 +53,12 @@ def camera_thread(cam, state_lock, buffer_lock, filter, map, imu_state_buffer, c
         Iy = cv2.Sobel(gray, cv2.CV_32F, 0, 1, ksize=3)
 
         #project lidar points to the current camera frame (u,v)
-        R_CI = np.eye(3) 
+        R_CI = np.array([
+            [ 0.0, -1.0,  0.0],  # Camera X (Right) = IMU -Y (Left)
+            [ 0.0,  0.0, -1.0],  # Camera Y (Down)  = IMU -Z (Up)
+            [ 1.0,  0.0,  0.0]   # Camera Z (Front) = IMU +X (Forward)
+        ])
+        # R_CI = np.eye(3) 
         T_CI = np.eye(4) #dummy camera imu extrinsics, real values have to be calibrated later
         T_CI[:3, :3] = R_CI
         T_CI[:3, 3] = np.zeros(3)
@@ -70,7 +75,8 @@ def camera_thread(cam, state_lock, buffer_lock, filter, map, imu_state_buffer, c
         projected_points_pixels = project_points_to_frame(
             visual_map_points, T_CI, T_GI
         )
-
+        print(f"DEBUG: Found {len(visual_map_points)} voxels, {len(projected_points_pixels)} projected onto image")
+        
         residual_list =[]
         H_rows = []
         #get the 8x8 pixel patch surrounding the current lidar point
