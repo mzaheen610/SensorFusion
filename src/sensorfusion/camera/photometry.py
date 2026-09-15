@@ -31,7 +31,7 @@ def camera_thread(cam, state_lock, buffer_lock, filter, map, imu_state_buffer, c
 
         if latest_scan is None or latest_scan_time is None or time.monotonic() - latest_scan_time > 0.3:
             cv2.imshow("Camera View (Lidar Projected)", display_frame) #show empty frame if lidar data is missing
-            cv2.waitkey(1)
+            cv2.waitKey(1)
             time.sleep(0.01)
             continue
 
