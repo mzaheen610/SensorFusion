@@ -232,7 +232,7 @@ class ESIKFStateEstimator:
             sigma_lidar = 0.02
             correction_applied = False
             self.last_lidar_association_count = len(valid_associations)
-            max_iterations = 5
+            max_iterations = 3
             P_inv = np.linalg.inv(P_copy)
 
             state_0 = copy_state(state)

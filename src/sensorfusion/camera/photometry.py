@@ -2,8 +2,9 @@ import numpy as np
 import time
 from queue import Empty
 from utils.projections import project_points_to_frame, calculate_photometric_error
-from utils.so3_rotation import skew, exp
+from utils.so3_rotation import skew, exp, reorthonormalize
 import cv2
+import copy
 
 DEBUG_CAMERA = True
 def camera_thread(cam, state_lock, buffer_lock, filter, map, imu_state_buffer, camera_scan_queue):
@@ -67,7 +68,9 @@ def camera_thread(cam, state_lock, buffer_lock, filter, map, imu_state_buffer, c
         T_CI[:3, :3] = R_CI
         T_CI[:3, 3] = np.zeros(3)
 
-        _, state_snapshot, _ = state_item #state item contains timestamp, state, cov
+        state_time, state_snapshot, P_snap = state_item #state item contains timestamp, state, cov
+        state_old = copy.deepcopy(state_snapshot)
+        state = copy.deepcopy(state_snapshot)
 
         T_GI = np.eye(4)
         T_GI[:3, :3] = state_snapshot.R
@@ -146,11 +149,11 @@ def camera_thread(cam, state_lock, buffer_lock, filter, map, imu_state_buffer, c
         cv2.waitKey(1)
 
         #do the camera based update using the residual and Kalman Gain
-        with state_lock:
-            P_copy = filter.P.copy()
-            # state = filter.state.copy()
+        # with state_lock:
+        #     P_copy = filter.P.copy()
+        #     # state = filter.state.copy()
 
-        P_inv = np.linalg.inv(P_copy)
+        P_inv = np.linalg.inv(P_snap)
         sigma_camera = 10.0
 
         r = np.asarray(residual_list, dtype=np.float64).ravel()
@@ -172,16 +175,46 @@ def camera_thread(cam, state_lock, buffer_lock, filter, map, imu_state_buffer, c
             print("rot:", dx[:3])
             print("pos:", dx[3:6])
 
+        max_rotation_correction = np.deg2rad(15.0)
+        max_position_correction = 1.0 #1 meter
+        max_velocity_correction = 0.3 #m/s tune to the platforms max vel
+        if (
+            not np.all(np.isfinite(dx))
+            or np.linalg.norm(dx[0:3]) > max_rotation_correction
+            or np.linalg.norm(dx[3:6]) > max_position_correction
+            or np.linalg.norm(dx[6:9]) > max_velocity_correction
+        ):
+            if DEBUG_CAMERA:
+                print(
+                    "Rejecting implausible correction: "
+                    f"rotation={np.linalg.norm(dx[0:3]):.3f} "
+                    f"position={np.linalg.norm(dx[3:6]):.3f}"
+                    f"velocity={np.linalg.norm(dx[6:9]):.3f}"
+                )
+            continue
+
+        theta_rot = dx[0:3]
+        state.R = state.R @ exp(theta_rot)
+        state.R = reorthonormalize(state.R)   # normalize the R matrix to prevent 
+        state.p  += dx[3:6]
+        state.v  += dx[6:9]
+        state.bg += dx[9:12]
+        state.ba += dx[12:15]
+        state.g  += dx[15:18]
+        I_KH = np.eye(P_snap.shape[0]) - K @ H
+        P_new = I_KH @ P_snap @ I_KH.T + K @ (sigma_camera**2 * np.eye(len(r))) @ K.T
+
         with state_lock:
-            filter.state.R = filter.state.R @ exp(dx[0:3])   
-            filter.state.p += dx[3:6]
-            filter.state.v += dx[6:9]
-            filter.state.bg += dx[9:12]
-            filter.state.ba += dx[12:15]
-            filter.state.g += dx[15:18]
-            
-            # Update LIVE covariance so we don't erase IMU predictions made mid-update
-            filter.P = (np.eye(18) - K @ H) @ filter.P
+            delta_p = state.p - state_old.p
+            delta_v = state.v - state_old.v
+            delta_R = state_old.R.T @ state.R
+            filter.state.p += delta_p
+            filter.state.v += delta_v
+            filter.state.R = filter.state.R @ delta_R
+            filter.state.bg += state.bg - state_old.bg
+            filter.state.ba += state.ba - state_old.ba
+            filter.state.g += state.g - state_old.g
+            filter.P = P_new
 
         # --- RATE TRACKING CALCULATION ---
         camera_update_count += 1

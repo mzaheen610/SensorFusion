@@ -57,6 +57,7 @@ class Map:
             if len(voxel["lidar"]) < self.max_points_per_voxel:   
                 voxel["lidar"].append(point)
                 voxel["color"].append(np.array([128.0, 128.0, 128.0]))  # placeholder gray
+                voxel["image"].append(None)  #store image patch per point
 
             
     def query(self, point, min_points_in_voxel=10, radius_voxels=1):
@@ -161,20 +162,35 @@ class Map:
                     visible_points.extend(voxel["lidar"])
 
         return visible_points
+
+    def get_point_index(self, point, voxel):
+        # match the exact point object/coords to its index in voxel["lidar"]
+        for i, p in enumerate(voxel["lidar"]):
+            if np.array_equal(p, point):
+                return i
     
     def add_visual_patch(self, point, patch):
         #add/attach the visual patch to the lidar point in the global map
         key = self.get_voxel_key(point)
-        self.voxel_map[key]["image"].append(patch)
+        voxel = self.voxel_map.get(key)
+        if voxel is None:
+            return
+        index = self.get_point_index(point, voxel)
+        if index is None or voxel["image"][index] is not None:
+            return
+        voxel["image"][index] = patch
 
     def get_reference_patch(self, point):
         #choose one image patch as the reference for now
         #will need to find the best patch for reference after score calculation(viewing angle, similarity based) later
         key = self.get_voxel_key(point)
         voxel = self.voxel_map.get(key)
-        if voxel is None or not voxel["image"]:
+        if voxel is None:
             return None
-        return voxel["image"][-1]
+        index = self.get_point_index(point, voxel)
+        if index is None or voxel["image"][index] is None:
+            return None
+        return voxel["image"][index]
 
     def set_point_color(self, point, color):
         #attach the color to the map point
@@ -183,10 +199,9 @@ class Map:
         if voxel is None:
             return
         # match the exact point object/coords to its index in voxel["lidar"]
-        for i, p in enumerate(voxel["lidar"]):
-            if np.array_equal(p, point):
-                voxel["color"][i] = color
-                break
+        index = self.get_point_index(point, voxel)
+        if index is not None:
+            voxel["color"][index] = color
 
     def get_all_points_and_colors(self):
         pts, cols = [], []
