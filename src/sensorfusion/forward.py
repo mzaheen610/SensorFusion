@@ -10,7 +10,7 @@ from utils.projections import project_points_world
 from lidar.update import copy_state, state_error
 # Per-point logging is extremely expensive on a Raspberry Pi. Enable only when
 # diagnosing a specific scan.
-DEBUG_LIDAR = True
+DEBUG_LIDAR = False
 #Kalman filter --- Prediction, Update/Correction
 
 @dataclass
@@ -30,7 +30,7 @@ class ESIKFStateEstimator:
         self.q_vel = 5e-3      # (m/s)^2/s -- accel noise density
         self.q_gyro_bias = 1e-8   # rad^2/s -- gyro bias random walk (slow)
         self.q_accel_bias = 1e-6  # (m/s^2)^2/s -- accel bias random walk (slow)
-        self.q_gravity = 1e-8    # near-static; only nudge via correlation
+        self.q_gravity = 1e-6    # near-static; only nudge via correlation
         self.R = np.eye(3) # measurement matrix
         dt = 0.01  # IMU is at 100Hz, so time step is 0.01 seconds
         self.state = State(
