@@ -94,12 +94,12 @@ def lidar_thread(state_lock, buffer_lock, filter, map, imu_measurement_buffer,
     prev_scan_bins = None
     static_count = 0
     ZUPT_CONSECUTIVE_REQUIRED = 5
-    ZUPT_DIST_THRESHOLD_MM = 50 #mm
+    ZUPT_DIST_THRESHOLD_MM = 15 #mm
     while True:
         try:
             scan_timestamp, scan = scan_queue.get()
 
-            if time.monotonic() - scan_timestamp > 0.25:
+            if time.monotonic() - scan_timestamp > 0.8:
                 if DEBUG_LIDAR:
                     print(
                         f"LiDAR compensation skipped: processing_age="
@@ -213,7 +213,8 @@ def lidar_thread(state_lock, buffer_lock, filter, map, imu_measurement_buffer,
                             flush=True,
                         )
                 #dont add points to the map when the update was not applied
-                if points_world is not None and update_applied:
+                # if points_world is not None and update_applied:
+                if points_world is not None:
                 # if points_world is not None:
                     map.add_points(points_world)
 

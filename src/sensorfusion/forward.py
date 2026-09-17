@@ -26,11 +26,11 @@ class ESIKFStateEstimator:
     def __init__(self):
         self.P = 1 * np.eye(18) # process covariance matrix
         self.q_rot = 1e-3      # rad^2/s -- gyro noise density
-        self.q_pos = 1e-4      # m^2/s (loosely, position integrates velocity)
-        self.q_vel = 1e-2      # (m/s)^2/s -- accel noise density
+        self.q_pos = 1e-5      # m^2/s (loosely, position integrates velocity)
+        self.q_vel = 5e-3      # (m/s)^2/s -- accel noise density
         self.q_gyro_bias = 1e-8   # rad^2/s -- gyro bias random walk (slow)
         self.q_accel_bias = 1e-6  # (m/s^2)^2/s -- accel bias random walk (slow)
-        self.q_gravity = 1e-10    # near-static; only nudge via correlation
+        self.q_gravity = 1e-8    # near-static; only nudge via correlation
         self.R = np.eye(3) # measurement matrix
         dt = 0.01  # IMU is at 100Hz, so time step is 0.01 seconds
         self.state = State(
@@ -127,7 +127,7 @@ class ESIKFStateEstimator:
         # state_updated = np.array()
         eps = 0.01
         MIN_INITIAL_POINTS = 30
-        MIN_ASSOCIATIONS = 10
+        MIN_ASSOCIATIONS = 3 if map.num_points() < 1000 else 10
         P_new = P_copy # Default fallback
 
         #Iterated Kalman Update
@@ -208,8 +208,8 @@ class ESIKFStateEstimator:
                     normal = vh[-1, :]  # Plane normal vector
                     # A horizontal 2D LiDAR slice does not provide a useful
                     # horizontal pose constraint from a near-vertical normal.
-                    if abs(normal[2]) > 0.9:
-                        continue
+                    # if abs(normal[2]) > 0.9:
+                    #     continue
                     valid_associations.append(('plane', point_lidar, center, normal))
                     if DEBUG_LIDAR:
                         print("Singular Values for plane:", s)
@@ -282,7 +282,7 @@ class ESIKFStateEstimator:
                     ])
                     # Compute a dynamic residual gate based on pose uncertainity
                     innovation_var = H_k @ P_copy @ H_k.T + sigma_lidar**2
-                    k=3
+                    k=4
                     gate = max(0.15, k * np.sqrt(innovation_var))   # k ≈ 3 for a ~99.7% confidence gate
                     if DEBUG_LIDAR:
                         print("Residual gate value:", gate)

@@ -73,7 +73,7 @@ def imu_thread(imu, filter_ref):
             )
         with buffer_lock:
             imu_state_buffer.append(imu_state)
-            while imu_measurement_buffer and now - imu_measurement_buffer[0][0] > 2.0:
+            while imu_measurement_buffer and now - imu_measurement_buffer[0][0] > 3.0:
                 imu_measurement_buffer.popleft()
 
         prediction_count += 1

@@ -149,7 +149,7 @@ class Lidar:
     def __init__(self, port='/dev/ttyUSB0', max_reconnect_attempts=5):
         self.port = port
         self.max_reconnect_attempts = max_reconnect_attempts
-        self._open_lidar(spinup_delay=4.0)
+        self._open_lidar(spinup_delay=10.0)
 
     def _open_lidar(self, spinup_delay=4.0):
         self.lidar = RPLidar(self.port, baudrate=256000, timeout=3)
