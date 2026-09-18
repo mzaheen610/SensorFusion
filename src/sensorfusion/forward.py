@@ -30,7 +30,7 @@ class ESIKFStateEstimator:
         self.q_vel = 5e-3      # (m/s)^2/s -- accel noise density
         self.q_gyro_bias = 1e-8   # rad^2/s -- gyro bias random walk (slow)
         self.q_accel_bias = 1e-6  # (m/s^2)^2/s -- accel bias random walk (slow)
-        self.q_gravity = 1e-6    # near-static; only nudge via correlation
+        self.q_gravity = 0.0      # frozen; gravity removed onboard BNO055
         self.R = np.eye(3) # measurement matrix
         dt = 0.01  # IMU is at 100Hz, so time step is 0.01 seconds
         self.state = State(
@@ -39,7 +39,7 @@ class ESIKFStateEstimator:
             v = np.zeros(3),
             bg = np.zeros(3),
             ba = np.zeros(3),
-            g = np.array([0,0,-9.81]),
+            g = np.zeros(3),
         )
         # Runtime diagnostics consumed by the LiDAR worker.
         self.last_lidar_update_applied = False
@@ -101,6 +101,9 @@ class ESIKFStateEstimator:
         self.state.R = reorthonormalize(self.state.R) # prevent det(R) runaway
         self.state.p += (self.state.v * dt) + (0.5 * accel * dt * dt) 
         self.state.v += accel * dt
+        # Enforce planar motion for 2D platform
+        self.state.p[2] = 0.0
+        self.state.v[2] = 0.0
 
         #Covariance update
         self.P = A @ self.P @ A.T + self.compute_process_noise(dt)
@@ -206,10 +209,6 @@ class ESIKFStateEstimator:
                         )
                 elif ratio21 > 0.3 and ratio31<0.1:
                     normal = vh[-1, :]  # Plane normal vector
-                    # A horizontal 2D LiDAR slice does not provide a useful
-                    # horizontal pose constraint from a near-vertical normal.
-                    # if abs(normal[2]) > 0.9:
-                    #     continue
                     valid_associations.append(('plane', point_lidar, center, normal))
                     if DEBUG_LIDAR:
                         print("Singular Values for plane:", s)
@@ -262,11 +261,14 @@ class ESIKFStateEstimator:
                         normal = geom_vec
                         res = float(np.dot(normal, vec))
                     else:
-                        # Edge/line feature: point-to-line residual instead of discarding
+                        # Edge/line feature: signed 2D in-plane point-to-line residual
                         direction = geom_vec
-                        perp = vec - np.dot(vec, direction) * direction  # component perpendicular to the line
-                        res = float(np.linalg.norm(perp))
-                        normal = perp / (res + 1e-9)  # "normal" here is the residual direction for the Jacobian
+                        n_line = np.array([-direction[1], direction[0], 0.0])
+                        norm_2d = np.linalg.norm(n_line[:2])
+                        if norm_2d > 1e-6:
+                            n_line /= norm_2d
+                        res = float(np.dot(n_line, vec))
+                        normal = n_line
 
 
                     #lidar jacobian computation
@@ -378,7 +380,9 @@ class ESIKFStateEstimator:
                 state.v  += dx[6:9]
                 state.bg += dx[9:12]
                 state.ba += dx[12:15]
-                state.g  += dx[15:18]
+                state.g[:] = 0.0
+                state.p[2] = 0.0
+                state.v[2] = 0.0
                 correction_applied = True
                 if best_residual_norm is None or residual_norm < best_residual_norm:
                     best_residual_norm = residual_norm
@@ -472,10 +476,12 @@ class ESIKFStateEstimator:
         state.R = state.R @ exp(theta_rot)
         state.R = reorthonormalize(state.R)
         state.p  += dx[3:6]
-        state.v  += dx[6:9]
+        state.v   = np.zeros(3)  # Platform is stationary, eliminate residual velocity
         state.bg += dx[9:12]
         state.ba += dx[12:15]
-        state.g  += dx[15:18]
+        state.g[:] = 0.0
+        state.p[2] = 0.0
+        state.v[2] = 0.0
 
         I = np.eye(18)
         self.P = (I - K @ H) @ self.P

@@ -197,7 +197,9 @@ def lidar_thread(state_lock, buffer_lock, filter, map, imu_measurement_buffer,
                     filter.state.R = filter.state.R @ delta_R
                     filter.state.bg += state.bg - state_old.bg
                     filter.state.ba += state.ba - state_old.ba
-                    filter.state.g += state.g - state_old.g
+                    filter.state.g[:] = 0.0
+                    filter.state.p[2] = 0.0
+                    filter.state.v[2] = 0.0
                     filter.P = P_new
                     if DEBUG_LIDAR:
                         print(
@@ -212,10 +214,8 @@ def lidar_thread(state_lock, buffer_lock, filter, map, imu_measurement_buffer,
                             f"det_R={np.linalg.det(filter.state.R):.12f}",
                             flush=True,
                         )
-                #dont add points to the map when the update was not applied
-                # if points_world is not None and update_applied:
-                if points_world is not None:
-                # if points_world is not None:
+                # Only add points to the map when the update was successfully applied
+                if points_world is not None and update_applied:
                     map.add_points(points_world)
 
                 # --- ZUPT check  ---
@@ -230,6 +230,9 @@ def lidar_thread(state_lock, buffer_lock, filter, map, imu_measurement_buffer,
                 prev_scan_bins = current_bins
                 if static_count >= ZUPT_CONSECUTIVE_REQUIRED:
                     filter.zupt_update()
+                    filter.state.v = np.zeros(3)
+                    filter.state.p[2] = 0.0
+                    filter.state.v[2] = 0.0
                     if DEBUG_LIDAR:
                         print(f"ZUPT applied | static_count={static_count}")
 

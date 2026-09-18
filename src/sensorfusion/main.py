@@ -107,7 +107,7 @@ if __name__ == "__main__":
     0.20**2, 0.20**2, 0.20**2,       # velocity
     0.01**2, 0.01**2, 0.01**2,       # gyro bias
     0.05**2, 0.05**2, 0.05**2,       # accel bias
-    0.05**2, 0.05**2, 0.05**2,       # gravity residual
+    0.0,     0.0,     0.0,           # gravity residual (frozen)
 ])
     filter.P = initial_covariance
 
@@ -140,7 +140,11 @@ if __name__ == "__main__":
                 - filter.state.g
             )
         time.sleep(0.01)
-    print("Mean stationary residual:", np.mean(residuals, axis=0))
+    mean_residual = np.mean(residuals, axis=0) if residuals else np.zeros(3)
+    print("Mean stationary residual:", mean_residual)
+    # Apply measured stationary residual into accelerometer bias
+    filter.state.ba += filter.state.R.T @ mean_residual
+    print("Calibrated ba:", filter.state.ba)
     
     lidar_prev_scan_time = {"time": time.monotonic()}
     # A single-slot queue prevents slow scan processing from allowing serial
@@ -186,6 +190,11 @@ if __name__ == "__main__":
 
     time.sleep(10) #wait for the lidar process to initialize properly
 
+    # Reset position and velocity after the 10s motor spinup to prevent open-loop accumulation
+    with state_lock:
+        filter.state.p = np.zeros(3)
+        filter.state.v = np.zeros(3)
+
     stream_thread = Thread(target=tcp_stream_thread, args=(map,), daemon=True)
     stream_thread.start()
 
@@ -194,9 +203,9 @@ if __name__ == "__main__":
     while(True):
         now = time.monotonic()
         #Apply 2D constraint since lidar cannot observe the Z axis
-        # with state_lock:
-        #     filter.state.p[2] = 0.0
-        #     filter.state.v[2] = 0.0
+        with state_lock:
+            filter.state.p[2] = 0.0
+            filter.state.v[2] = 0.0
         if now - prev_time >= 1:
             prev_time = now
             with state_lock:

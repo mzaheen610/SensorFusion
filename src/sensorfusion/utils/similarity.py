@@ -26,4 +26,4 @@ def scan_similarity(bins_a, bins_b):
     valid = ~np.isnan(bins_a) & ~np.isnan(bins_b)
     if valid.sum() < MIN_VALID_BINS:
         return None  # not enough overlapping structure to judge
-    return float(np.mean(np.abs(bins_a[valid] - bins_b[valid])))
+    return float(np.median(np.abs(bins_a[valid] - bins_b[valid])))

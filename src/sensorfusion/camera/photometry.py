@@ -202,7 +202,7 @@ def camera_thread(cam, state_lock, buffer_lock, filter, map, imu_state_buffer, c
         state.ba += dx[12:15]
         state.g  += dx[15:18]
         I_KH = np.eye(P_snap.shape[0]) - K @ H
-        P_new = I_KH @ P_snap @ I_KH.T + K @ (sigma_camera**2 * np.eye(len(r))) @ K.T
+        P_new = I_KH @ P_snap @ I_KH.T + (sigma_camera**2) * (K @ K.T)
 
         with state_lock:
             delta_p = state.p - state_old.p
