@@ -153,7 +153,10 @@ def camera_thread(cam, state_lock, buffer_lock, filter, map, imu_state_buffer, c
         #     P_copy = filter.P.copy()
         #     # state = filter.state.copy()
 
-        P_inv = np.linalg.inv(P_snap)
+        try:
+            P_inv = np.linalg.inv(P_snap)
+        except np.linalg.LinAlgError:
+            P_inv = np.linalg.pinv(P_snap)
         sigma_camera = 10.0
 
         r = np.asarray(residual_list, dtype=np.float64).ravel()

@@ -232,7 +232,10 @@ class ESIKFStateEstimator:
             correction_applied = False
             self.last_lidar_association_count = len(valid_associations)
             max_iterations = 3
-            P_inv = np.linalg.inv(P_copy)
+            try:
+                P_inv = np.linalg.inv(P_copy)
+            except np.linalg.LinAlgError:
+                P_inv = np.linalg.pinv(P_copy)
 
             state_0 = copy_state(state)
             prev_residual_norm = None
@@ -325,7 +328,10 @@ class ESIKFStateEstimator:
 
 
                 R_inv = (1.0 / sigma_lidar**2) * np.eye(len(r)) 
-                kalman_gain = np.linalg.inv(H.T @ R_inv @ H + P_inv) @ (H.T @ R_inv)
+                try:
+                    kalman_gain = np.linalg.inv(H.T @ R_inv @ H + P_inv) @ (H.T @ R_inv)
+                except np.linalg.LinAlgError:
+                    kalman_gain = np.linalg.pinv(H.T @ R_inv @ H + P_inv) @ (H.T @ R_inv)
 
                 # dx = kalman_gain @ r #error-state vector
                 dx_from_prior = state_error(state, state_0)

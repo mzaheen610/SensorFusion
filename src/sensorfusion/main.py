@@ -107,7 +107,7 @@ if __name__ == "__main__":
     0.20**2, 0.20**2, 0.20**2,       # velocity
     0.01**2, 0.01**2, 0.01**2,       # gyro bias
     0.05**2, 0.05**2, 0.05**2,       # accel bias
-    0.0,     0.0,     0.0,           # gravity residual (frozen)
+    0.01**2, 0.01**2, 0.01**2,       # gravity residual (frozen)
 ])
     filter.P = initial_covariance
 
