@@ -233,6 +233,11 @@ def camera_thread(cam, state_lock, buffer_lock, filter, map, imu_state_buffer, c
                     f"velocity={np.linalg.norm(dx[6:9]):.3f}"
                 )
             continue
+        
+        dx[6:9]   = 0.0  # Zero out velocity (camera cannot observe velocity directly)
+        dx[9:12]  = 0.0  # Zero out gyro bias
+        dx[12:15] = 0.0  # Zero out accel bias (STOPS ACCEL BIAS RUNAWAY!)
+        dx[15:18] = 0.0  # Zero out gravity
 
         theta_rot = dx[0:3]
         state.R = state.R @ exp(theta_rot)
