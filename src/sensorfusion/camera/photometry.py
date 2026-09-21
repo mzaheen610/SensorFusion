@@ -6,7 +6,7 @@ from utils.projections import (
     calculate_photometric_error,
     focals,
     dist_coeffs,
-    K,
+    K_cam,
 )
 from utils.so3_rotation import skew, exp, reorthonormalize
 import cv2
@@ -34,8 +34,9 @@ def camera_thread(cam, state_lock, buffer_lock, filter, map, imu_state_buffer, c
             frame = cv2.resize(frame, (640, 480))
 
         # Undistort frame using calibrated intrinsics if available
-        if dist_coeffs is not None and K is not None:
-            frame = cv2.undistort(frame, K, dist_coeffs)
+        if dist_coeffs is not None and K_cam is not None:
+            frame = cv2.undistort(frame, K_cam, dist_coeffs)
+
 
         
         display_frame = frame.copy()

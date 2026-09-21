@@ -15,21 +15,24 @@ calib_paths = [
 
 calib_file = next((p for p in calib_paths if os.path.exists(p)), None)
 dist_coeffs = None
-K = None
+K_cam = None
 
 if calib_file is not None:
     try:
         calib_data = np.load(calib_file)
-        K = calib_data["mtx"]
+        K_cam = calib_data["mtx"]
         dist_coeffs = calib_data["dist"]
-        focals = [float(K[0, 0]), float(K[1, 1])]
-        center = [float(K[0, 2]), float(K[1, 2])]
+        focals = [float(K_cam[0, 0]), float(K_cam[1, 1])]
+        center = [float(K_cam[0, 2]), float(K_cam[1, 2])]
     except Exception:
         focals = [529.6, 528.8]
         center = [320.0, 240.0]
 else:
     focals = [529.6, 528.8]
     center = [320.0, 240.0]
+
+K = K_cam
+
 
 
 def project_points_to_frame(points, cam_imu_transform, glob_imu):
