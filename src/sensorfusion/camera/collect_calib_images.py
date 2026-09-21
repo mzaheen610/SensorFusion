@@ -1,12 +1,16 @@
 import os
+import sys
 import cv2
-from picamera2 import Picamera2
 
-# Initialize camera in video mode for smooth display
-picam2 = Picamera2()
-config = picam2.create_video_configuration(main={"size": (640, 480), "format": "RGB888"})
-picam2.configure(config)
-picam2.start()
+# Add path to import initialize directly
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
+try:
+    from initialize import CameraSensor
+except ImportError:
+    from sensorfusion.initialize import CameraSensor
+
+# Initialize using the exact same sensor class as main.py
+cam = CameraSensor()
 
 output_dir = "calibration_images"
 os.makedirs(output_dir, exist_ok=True)
@@ -22,8 +26,8 @@ print("   - Press [q] to exit")
 print("--------------------------------------------------\n")
 
 while count < total_images:
-    # 1. Grab live frame
-    frame_rgb = picam2.capture_array()
+    # 1. Grab live frame directly from CameraSensor (native 640x480)
+    frame_rgb = cam.get_frame()
     frame_bgr = cv2.cvtColor(frame_rgb, cv2.COLOR_RGB2BGR)
 
     # 2. Add image counter text to preview
@@ -53,5 +57,8 @@ while count < total_images:
         break
 
 cv2.destroyAllWindows()
-picam2.stop()
+try:
+    cam.camera.stop()
+except Exception:
+    pass
 print(f"\nFinished! All images saved in '{output_dir}/'.")

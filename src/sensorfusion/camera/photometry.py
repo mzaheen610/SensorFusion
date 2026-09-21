@@ -1,7 +1,13 @@
 import numpy as np
 import time
 from queue import Empty
-from utils.projections import project_points_to_frame, calculate_photometric_error
+from utils.projections import (
+    project_points_to_frame,
+    calculate_photometric_error,
+    focals,
+    dist_coeffs,
+    K,
+)
 from utils.so3_rotation import skew, exp, reorthonormalize
 import cv2
 import copy
@@ -23,8 +29,14 @@ def camera_thread(cam, state_lock, buffer_lock, filter, map, imu_state_buffer, c
             time.sleep(0.01)
             continue
 
-        # Resize the frame to 640x480 for fast Pi processing and correct math
-        frame = cv2.resize(frame, (640, 480))
+        # Native hardware frame is 640x480; fallback resize only if dimension differs
+        if frame.shape[1] != 640 or frame.shape[0] != 480:
+            frame = cv2.resize(frame, (640, 480))
+
+        # Undistort frame using calibrated intrinsics if available
+        if dist_coeffs is not None and K is not None:
+            frame = cv2.undistort(frame, K, dist_coeffs)
+
         
         display_frame = frame.copy()
         #Get the latest compensated lidar scan from the camera queue
@@ -231,8 +243,8 @@ def camera_thread(cam, state_lock, buffer_lock, filter, map, imu_state_buffer, c
         time.sleep(0.01)
 
 def projection_and_pose_jacobian(T_GI, T_CI, P_G):
-    fx = 529.6
-    fy = 528.8
+    fx = focals[0]
+    fy = focals[1]
 
     R_GI = T_GI[:3, :3]
     p_GI = T_GI[:3, 3]

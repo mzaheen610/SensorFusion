@@ -6,8 +6,7 @@ import time
 from rplidar import RPLidar
 import adafruit_bno055
 import board
-import busio
-from picamzero import Camera as PiCamera
+from picamera2 import Picamera2
 import numpy as np
 from utils.so3_rotation import exp
 
@@ -221,13 +220,18 @@ class Lidar:
 
 class CameraSensor:
     def __init__(self):
-        self.camera = PiCamera()
+        self.camera = Picamera2()
+        config = self.camera.create_video_configuration(
+            main={"size": (640, 480), "format": "RGB888"}
+        )
+        self.camera.configure(config)
+        self.camera.start()
 
     def take_photo(self, path):
-        self.camera.take_photo(path)
+        self.camera.capture_file(path)
 
     def get_frame(self):
-        frame = self.camera.capture_array()
-        return frame
+        return self.camera.capture_array()
+
     
 

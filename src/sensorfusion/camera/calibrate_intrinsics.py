@@ -4,8 +4,7 @@ import cv2
 import numpy as np
 
 # Set to the number of INTERNAL CORNERS (intersections), NOT squares!
-# Count inner points along width and height:
-CHECKERBOARD = (9, 6) 
+CHECKERBOARD = (8, 5) 
 square_size = 0.030  # Square size in meters (e.g., 0.025 for 25mm)
 
 criteria = (cv2.TERM_CRITERIA_EPS + cv2.TERM_CRITERIA_MAX_ITER, 30, 0.001)
@@ -83,6 +82,11 @@ print(f"Reprojection Error: {ret:.4f} pixels (lower is better, ideally < 0.5)")
 print(f"Camera Matrix K (fx, fy, cx, cy):\n{mtx}")
 print(f"Distortion Coefficients D (k1, k2, p1, p2, k3):\n{dist.ravel()}")
 
-# Save to disk
+# Save to disk (both current directory and parent sensorfusion folder)
 np.savez("calibration_params.npz", mtx=mtx, dist=dist)
+try:
+    parent_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "calibration_params.npz"))
+    np.savez(parent_path, mtx=mtx, dist=dist)
+except Exception:
+    pass
 print("\nSaved parameters to 'calibration_params.npz'")
