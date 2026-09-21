@@ -4,7 +4,7 @@ import pickle
 import time
 import numpy as np
 
-def tcp_stream_thread(map_ref, host='0.0.0.0', port=5000):
+def tcp_stream_thread(map_ref, imu_state_buffer, buffer_lock=None, host='0.0.0.0', port=5000):
     server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
     server.bind((host, port))
@@ -16,10 +16,29 @@ def tcp_stream_thread(map_ref, host='0.0.0.0', port=5000):
         try:
             while True:
                 points, colors = map_ref.get_all_points_and_colors()
+
+                # Safely extract only position coordinates (x, y, z)
+                if buffer_lock is not None:
+                    with buffer_lock:
+                        traj_pts = [item[1].p.copy() for item in imu_state_buffer]
+                else:
+                    try:
+                        traj_pts = [item[1].p.copy() for item in list(imu_state_buffer)]
+                    except Exception:
+                        traj_pts = []
+
+                trajectory = np.asarray(traj_pts, dtype=np.float32) if traj_pts else np.empty((0, 3), dtype=np.float32)
+
+                # Downsample if buffer is huge (> 5000 points) to keep payload small
+                if len(trajectory) > 5000:
+                    step = max(1, len(trajectory) // 5000)
+                    trajectory = trajectory[::step]
+
                 payload = {
                     "map_points": points,
                     "colors": colors.astype(np.uint8),  # 0-255, keeps payload small
-                    }
+                    "trajectory": trajectory
+                }
 
                 data = pickle.dumps(
                     payload,

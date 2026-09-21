@@ -195,7 +195,11 @@ if __name__ == "__main__":
         filter.state.p = np.zeros(3)
         filter.state.v = np.zeros(3)
 
-    stream_thread = Thread(target=tcp_stream_thread, args=(map,), daemon=True)
+    stream_thread = Thread(
+        target=tcp_stream_thread,
+        args=(map, imu_state_buffer, buffer_lock),
+        daemon=True,
+    )
     stream_thread.start()
 
     prev_time = time.monotonic()
