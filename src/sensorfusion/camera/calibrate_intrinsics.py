@@ -6,7 +6,7 @@ import numpy as np
 # Set to the number of INTERNAL CORNERS (intersections), NOT squares!
 # Count inner points along width and height:
 CHECKERBOARD = (9, 6) 
-square_size = 0.025  # Square size in meters (e.g., 0.025 for 25mm)
+square_size = 0.030  # Square size in meters (e.g., 0.025 for 25mm)
 
 criteria = (cv2.TERM_CRITERIA_EPS + cv2.TERM_CRITERIA_MAX_ITER, 30, 0.001)
 
