@@ -37,8 +37,6 @@ def camera_thread(cam, state_lock, buffer_lock, filter, map, imu_state_buffer, c
         if dist_coeffs is not None and K_cam is not None:
             frame = cv2.undistort(frame, K_cam, dist_coeffs)
 
-
-        
         display_frame = frame.copy()
         #Get the latest compensated lidar scan from the camera queue
         try:
@@ -47,7 +45,7 @@ def camera_thread(cam, state_lock, buffer_lock, filter, map, imu_state_buffer, c
         except Empty:
             pass
 
-        if latest_scan is None or latest_scan_time is None or time.monotonic() - latest_scan_time > 0.3:
+        if latest_scan is None or latest_scan_time is None or time.monotonic() - latest_scan_time > 0.8:
             cv2.imshow("Camera View (Lidar Projected)", display_frame) #show empty frame if lidar data is missing
             cv2.waitKey(1)
             time.sleep(0.01)
@@ -99,8 +97,35 @@ def camera_thread(cam, state_lock, buffer_lock, filter, map, imu_state_buffer, c
 
         residual_list =[]
         H_rows = []
-        #get the 8x8 pixel patch surrounding the current lidar point
+
+        MIN_GRADIENT_NORM = 25 #Discards flat walls/sensor noise 
+        scored_candidates = []
+        """
+        Optimize the photometric residual calculation and jacobian computation
+        """
+        #use only the projected points which has considerable strong gradients
+        projected_points_filtered = []
         for point in projected_points_pixels:
+            pixel = point[1]
+            u = int(round(pixel[0]))
+            v = int(round(pixel[1]))
+
+            if (v - 4 < 0 or v + 4 > frame.shape[0]
+                    or u - 4 < 0 or u + 4 > frame.shape[1]):
+                continue
+
+            Ix_patch = Ix[v-4:v+4, u-4:u+4]
+            Iy_patch = Iy[v-4:v+4, u-4:u+4]
+
+            patch_norm = np.linalg.norm(Ix_patch) + np.linalg.norm(Iy_patch)
+            if patch_norm > MIN_GRADIENT_NORM and len(projected_points_filtered)<=30:
+                scored_candidates.append((patch_norm, point))
+        #get the strongest 30 points based on score for further processing
+        scored_candidates.sort(key=lambda x: x[0], reverse=True) #sort descending by contrast score
+        projected_points_filtered = [item[1] for item in scored_candidates[:30]]
+
+        #get the 8x8 pixel patch surrounding the current lidar point
+        for point in projected_points_filtered:
             #get the 8x8 patch surrounding the pixel
             pixel = point[1]
             u = int(round(pixel[0]))
