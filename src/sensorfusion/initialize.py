@@ -6,6 +6,7 @@ import time
 from rplidar import RPLidar
 import adafruit_bno055
 import board
+import busio
 from picamera2 import Picamera2
 import numpy as np
 from utils.so3_rotation import exp
