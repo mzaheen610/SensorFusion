@@ -190,6 +190,21 @@ if __name__ == "__main__":
 
     time.sleep(10) #wait for the lidar process to initialize properly
 
+    # Re-calibrate accelerometer bias with LiDAR motor running to absorb motor vibration baseline
+    motor_residuals = []
+    for _ in range(100):
+        reading = imu.get_readings()
+        if reading is not None:
+            _, accel, _ = reading
+            motor_residuals.append(
+                filter.state.R @ (accel - filter.state.ba) - filter.state.g
+            )
+        time.sleep(0.01)
+    if motor_residuals:
+        motor_mean = np.mean(motor_residuals, axis=0)
+        filter.state.ba += filter.state.R.T @ motor_mean
+        print("Post-spinup calibrated ba:", filter.state.ba)
+
     # Reset position and velocity after the 10s motor spinup to prevent open-loop accumulation
     with state_lock:
         filter.state.p = np.zeros(3)
@@ -206,10 +221,6 @@ if __name__ == "__main__":
 
     while(True):
         now = time.monotonic()
-        #Apply 2D constraint since lidar cannot observe the Z axis
-        with state_lock:
-            filter.state.p[2] = 0.0
-            filter.state.v[2] = 0.0
         if now - prev_time >= 1:
             prev_time = now
             with state_lock:

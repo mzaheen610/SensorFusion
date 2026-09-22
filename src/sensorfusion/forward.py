@@ -29,17 +29,20 @@ class ESIKFStateEstimator:
         self.q_pos = 1e-5      # m^2/s (loosely, position integrates velocity)
         self.q_vel = 5e-3      # (m/s)^2/s -- accel noise density
         self.q_gyro_bias = 1e-8   # rad^2/s -- gyro bias random walk (slow)
-        self.q_accel_bias = 1e-6  # (m/s^2)^2/s -- accel bias random walk (slow)
+        self.q_accel_bias = 1e-4  # (m/s^2)^2/s -- accel bias random walk allows ZUPT to track bias
         self.q_gravity = 0.0      # frozen; gravity removed onboard BNO055
         self.R = np.eye(3) # measurement matrix
         dt = 0.01  # IMU is at 100Hz, so time step is 0.01 seconds
+        self.dt = dt
+        self.Q = np.zeros((18, 18))
+        self.A = np.eye(18)
         self.state = State(
-            R = np.eye(3,3),
-            p = np.zeros(3),
-            v = np.zeros(3),
-            bg = np.zeros(3),
-            ba = np.zeros(3),
-            g = np.zeros(3),
+            R=np.eye(3),
+            p=np.zeros(3),
+            v=np.zeros(3),
+            bg=np.zeros(3),
+            ba=np.zeros(3),
+            g=np.zeros(3)
         )
         # Runtime diagnostics consumed by the LiDAR worker.
         self.last_lidar_update_applied = False
@@ -59,14 +62,12 @@ class ESIKFStateEstimator:
         Q[15:18, 15:18] = self.q_gravity * dt * np.eye(3)
         return Q
     
-    def compute_jacobian(self, x_prev, u, dt):
+    def compute_jacobian(self, x_prev: State, u: list, dt):
         #Computing Jacobian of the state model wrt the state error delta_x
         # dt = dt
         A = np.eye(18)
-        a_I = u[1] - x_prev.ba
-        w_I = u[0] - x_prev.bg
-        a_skew = skew(a_I)
-        w_skew = skew(w_I)
+        w_skew = skew(u[0] - x_prev.bg)
+        a_skew = skew(u[1] - x_prev.ba)
 
         # 1. Rotation error evolution
         # Approximation of expm(-w_skew * dt)
@@ -101,9 +102,6 @@ class ESIKFStateEstimator:
         self.state.R = reorthonormalize(self.state.R) # prevent det(R) runaway
         self.state.p += (self.state.v * dt) + (0.5 * accel * dt * dt) 
         self.state.v += accel * dt
-        # Enforce planar motion for 2D platform
-        self.state.p[2] = 0.0
-        self.state.v[2] = 0.0
 
         #Covariance update
         self.P = A @ self.P @ A.T + self.compute_process_noise(dt)
@@ -130,7 +128,7 @@ class ESIKFStateEstimator:
         # state_updated = np.array()
         eps = 0.01
         MIN_INITIAL_POINTS = 30
-        MIN_ASSOCIATIONS = 3 if map.num_points() < 1000 else 10
+        MIN_ASSOCIATIONS = 3
         P_new = P_copy # Default fallback
 
         #Iterated Kalman Update
@@ -292,7 +290,7 @@ class ESIKFStateEstimator:
                     # Compute a dynamic residual gate based on pose uncertainity
                     innovation_var = H_k @ P_copy @ H_k.T + sigma_lidar**2
                     k=4
-                    gate = max(0.15, k * np.sqrt(innovation_var))   # k ≈ 3 for a ~99.7% confidence gate
+                    gate = max(0.35, k * np.sqrt(innovation_var))   # Wide enough to pull back drifted poses without rejection
                     if DEBUG_LIDAR:
                         print("Residual gate value:", gate)
                     if abs(res) > gate:
@@ -383,6 +381,8 @@ class ESIKFStateEstimator:
                     correction_applied = False
                     break
 
+                dx[0:2]   = 0.0  # 2D planar LiDAR cannot observe roll or pitch; lock to horizontal
+                dx[5]     = 0.0  # 2D planar LiDAR cannot observe Z translation
                 dx[6:9]   = 0.0  # LiDAR cannot observe velocity; prevent cross-covariance artifacts
                 dx[9:12]  = 0.0  # Prevent gyro bias corruption from scan matching noise
                 dx[12:15] = 0.0  # Accel bias is unobservable from LiDAR; lock to calibrated value
@@ -396,8 +396,6 @@ class ESIKFStateEstimator:
                 state.bg += dx[9:12]
                 state.ba += dx[12:15]
                 state.g[:] = 0.0
-                state.p[2] = 0.0
-                state.v[2] = 0.0
                 correction_applied = True
                 if best_residual_norm is None or residual_norm < best_residual_norm:
                     best_residual_norm = residual_norm
@@ -487,6 +485,8 @@ class ESIKFStateEstimator:
                 f"g={np.linalg.norm(dx[15:18]):.6f}",
             )
 
+        dx[0:3]   = 0.0  # Attitude is unobservable from velocity in the absence of gravity
+        dx[9:12]  = 0.0  # Gyro bias is unobservable from velocity
         dx[15:18] = 0.0  # Gravity is frozen
 
         theta_rot = dx[0:3]
@@ -497,8 +497,6 @@ class ESIKFStateEstimator:
         state.bg += dx[9:12]
         state.ba += dx[12:15]
         state.g[:] = 0.0
-        state.p[2] = 0.0
-        state.v[2] = 0.0
 
         I = np.eye(18)
         self.P = (I - K @ H) @ self.P

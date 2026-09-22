@@ -19,7 +19,7 @@ def build_backward_trajectory(scan_end_time, imu_pose, imu_measurement_buffer, m
         if imu_time < min_time:
             break
         dt = current_time - imu_time
-        if dt <= 0.0 or dt > 0.1:
+        if dt <= 0.0 or dt > 0.2:
             break
         pose_j = compute_prev_pose(pose_j, dt, gyro, accel)  # only deepcopies once per step now
         trajectory.append((imu_time, deepcopy(pose_j)))
@@ -30,12 +30,12 @@ def interpolated_pose(trajectory, target_time):
     """trajectory is newest -> oldest: [(t0, pose0), (t1, pose1), ...] with t0 >= t1 >= ..."""
     if not trajectory:
         return None
-    # Do not extrapolate when the point is older than the cached trajectory.
-    if target_time < trajectory[-1][0]:
-        return None
     # After the newest (scan_end_time): use that directly
     if target_time >= trajectory[0][0]:
         return trajectory[0][1]
+    # Before the oldest cached pose: use the oldest cached pose
+    if target_time <= trajectory[-1][0]:
+        return trajectory[-1][1]
 
     # Find the bracketing pair and pick the nearer one (nearest-neighbor;
     # cheap and avoids interpolating rotations, which needs care with SO(3))
@@ -44,7 +44,7 @@ def interpolated_pose(trajectory, target_time):
         t_lo, pose_lo = trajectory[i + 1]
         if t_lo <= target_time <= t_hi:
             return pose_hi if (t_hi - target_time) <= (target_time - t_lo) else pose_lo
-    return None
+    return trajectory[-1][1]
 
 def compute_prev_pose(current_state, delta_time, gyro, accel):
     x_prev = deepcopy(current_state)
@@ -81,21 +81,20 @@ def backprop(scan_end_time, prev_scan_time, imu_pose, scan, imu_measurement_buff
     min_point_time = prev_scan_time
 
     trajectory = build_backward_trajectory(scan_end_time, imu_pose, imu_measurement_buffer, min_point_time)
-    # angular_rate_lidar = 2 * pi * 10 # 10Hz LiDAR scan frequency
     for index, point in enumerate(scan):
-        #Find the delta time between scan end and the point sampled time
+        # Find the delta time between scan end and the point sampled time
         point_time = (index / max(len(scan) - 1, 1)) * scan_period
-        point_abs_time = prev_scan_time + point_time
+        point_abs_time = min_point_time + point_time
 
-        #Find the closest pose in trajectory and interpolate
+        # Find the closest pose in trajectory and interpolate
         pose_j = interpolated_pose(trajectory, point_abs_time)
-
         if pose_j is None:
-            continue
-        #Transform the point to the scan end time frame using the pose_j
+            pose_j = imu_pose
+
+        # Transform the point to the scan end time frame using the pose_j
         angle = np.deg2rad(point[1])
-        distance = point[2] / 1000.0 #convert mm to meters
-        point_body = np.array([distance * np.cos(angle), distance * np.sin(angle), 0]) #point in body frame
+        distance = point[2] / 1000.0  # convert mm to meters
+        point_body = np.array([distance * np.cos(angle), distance * np.sin(angle), 0.0])  # point in body frame
         R_kj = imu_pose.R.T @ pose_j.R
         p_kj = imu_pose.R.T @ (pose_j.p - imu_pose.p)
 

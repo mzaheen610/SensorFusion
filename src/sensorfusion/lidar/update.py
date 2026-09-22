@@ -18,6 +18,7 @@ def lidar_acquisition_thread(lidar, scan_queue, camera_scan_queue=None):
     """Continuously drain the LiDAR serial stream into a latest-scan queue."""
     scan_count = 0
     last_report = time.monotonic()
+    prev_scan_timestamp = time.monotonic()
     while True:
         scan = lidar.get_readings()
         if scan is None:
@@ -26,6 +27,8 @@ def lidar_acquisition_thread(lidar, scan_queue, camera_scan_queue=None):
 
         scan_timestamp = time.monotonic()
         scan_count += 1
+        scan_start_time = prev_scan_timestamp
+        prev_scan_timestamp = scan_timestamp
         now = scan_timestamp
         if now - last_report >= 1.0:
             print(
@@ -38,8 +41,9 @@ def lidar_acquisition_thread(lidar, scan_queue, camera_scan_queue=None):
 
         # Processing must never make the serial reader wait.  Retain only the
         # most recent complete scan when the fusion update falls behind.
+        item = (scan_timestamp, scan, scan_start_time)
         try:
-            scan_queue.put_nowait((scan_timestamp, scan))
+            scan_queue.put_nowait(item)
         except Full:
             try:
                 # multiprocessing.Queue uses a feeder thread, so an item may
@@ -48,7 +52,7 @@ def lidar_acquisition_thread(lidar, scan_queue, camera_scan_queue=None):
             except Empty:
                 continue
             try:
-                scan_queue.put_nowait((scan_timestamp, scan))
+                scan_queue.put_nowait(item)
             except Full:
                 pass
 
@@ -97,7 +101,16 @@ def lidar_thread(state_lock, buffer_lock, filter, map, imu_measurement_buffer,
     ZUPT_DIST_THRESHOLD_MM = 50 #mm
     while True:
         try:
-            scan_timestamp, scan = scan_queue.get()
+            scan_item = scan_queue.get()
+            if len(scan_item) == 3:
+                scan_timestamp, scan, scan_start_time = scan_item
+            else:
+                scan_timestamp, scan = scan_item
+                scan_start_time = scan_timestamp - 0.08
+
+            scan_duration = scan_timestamp - scan_start_time
+            if not (0.05 < scan_duration < 0.25):
+                scan_start_time = scan_timestamp - 0.08
 
             if time.monotonic() - scan_timestamp > 0.8:
                 if DEBUG_LIDAR:
@@ -130,7 +143,7 @@ def lidar_thread(state_lock, buffer_lock, filter, map, imu_measurement_buffer,
             scan_start = time.monotonic()
             lidar_points_compensated = backprop(
                 scan_timestamp,
-                lidar_prev_scan_time["time"],
+                scan_start_time,
                 state,
                 scan,
                 imu_buffer,
@@ -198,8 +211,6 @@ def lidar_thread(state_lock, buffer_lock, filter, map, imu_measurement_buffer,
                     filter.state.bg += state.bg - state_old.bg
                     filter.state.ba += state.ba - state_old.ba
                     filter.state.g[:] = 0.0
-                    filter.state.p[2] = 0.0
-                    filter.state.v[2] = 0.0
                     filter.P = P_new
                     if DEBUG_LIDAR:
                         print(
@@ -231,8 +242,6 @@ def lidar_thread(state_lock, buffer_lock, filter, map, imu_measurement_buffer,
                 if static_count >= ZUPT_CONSECUTIVE_REQUIRED:
                     filter.zupt_update()
                     filter.state.v = np.zeros(3)
-                    filter.state.p[2] = 0.0
-                    filter.state.v[2] = 0.0
                     if DEBUG_LIDAR:
                         print(f"ZUPT applied | static_count={static_count}")
 

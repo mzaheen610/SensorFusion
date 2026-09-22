@@ -261,7 +261,8 @@ def camera_thread(cam, state_lock, buffer_lock, filter, map, imu_state_buffer, c
                 filter.state.bg += state.bg - state_old.bg
                 filter.state.ba += state.ba - state_old.ba
                 filter.state.g += state.g - state_old.g
-                filter.P = P_new
+                # Update only the pose covariance block; do not overwrite velocity or bias covariances with stale P_snap
+                filter.P[0:6, 0:6] = P_new[0:6, 0:6]
 
             # --- RATE TRACKING CALCULATION ---
             camera_update_count += 1

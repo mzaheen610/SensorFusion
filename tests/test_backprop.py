@@ -81,6 +81,27 @@ class BackpropTests(unittest.TestCase):
         np.testing.assert_allclose(compensated[1], expected_second, atol=1e-8)
         self.assertTrue(np.isfinite(np.asarray(compensated)).all())
 
+    def test_backprop_retains_points_when_trajectory_sparse(self):
+        """Points are preserved even if IMU trajectory history is sparse or non-bracketing."""
+        imu_pose = make_pose()
+        scan = [
+            (15, 0.0, 1000.0),
+            (15, 90.0, 2000.0),
+            (15, 180.0, 1500.0),
+            (15, 270.0, 2500.0),
+        ]
+        # IMU buffer has a single sample at scan_end_time
+        compensated = backprop(
+            scan_end_time=10.08,
+            prev_scan_time=10.00,
+            imu_pose=imu_pose,
+            scan=scan,
+            imu_measurement_buffer=[(10.08, np.zeros(3), np.zeros(3))],
+        )
+
+        self.assertEqual(len(compensated), 4)
+        self.assertTrue(np.isfinite(compensated).all())
+
 
 if __name__ == "__main__":
     unittest.main()

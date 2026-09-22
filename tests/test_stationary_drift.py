@@ -7,6 +7,7 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(PROJECT_ROOT / "src" / "sensorfusion"))
 
 from forward import ESIKFStateEstimator
+from map import Map
 from utils.similarity import scan_similarity
 
 
@@ -26,9 +27,9 @@ class StationaryDriftTests(unittest.TestCase):
         # Position should stay within millimetres
         self.assertLess(np.linalg.norm(estimator.state.p), 0.05)
         self.assertLess(np.linalg.norm(estimator.state.v), 0.02)
-        # Z-axis should be exactly 0
-        self.assertEqual(estimator.state.p[2], 0.0)
-        self.assertEqual(estimator.state.v[2], 0.0)
+        # Z-axis should be bounded by noise (observable 3D motion)
+        self.assertLess(abs(estimator.state.p[2]), 0.02)
+        self.assertLess(abs(estimator.state.v[2]), 0.01)
         self.assertTrue(np.all(estimator.state.g == 0.0))
 
     def test_signed_line_residuals_have_zero_mean(self):
@@ -87,6 +88,63 @@ class StationaryDriftTests(unittest.TestCase):
         self.assertEqual(P_new.shape, (18, 18))
         self.assertTrue(np.isfinite(P_new).all())
         np.testing.assert_allclose(P_new, P_new.T, atol=1e-8)
+
+    def test_stationary_lock_prevents_uncalibrated_drift_and_adapts_bias(self):
+        """Standard ZUPT bounds drift and adapts ba under sensor bias via Kalman update."""
+        estimator = ESIKFStateEstimator()
+        dt = 0.033  # ~30 Hz
+        true_bias = np.array([0.02, 0.03, 0.0])
+
+        # Simulate 5 cycles of 1 second IMU prediction followed by standard ZUPT
+        for cycle in range(5):
+            for _ in range(30):
+                gyro = np.zeros(3)
+                accel = true_bias + np.random.normal(0, 0.005, 3)
+                estimator.predict((gyro, accel), dt)
+
+            # Standard ZUPT Kalman update
+            estimator.zupt_update()
+
+        # After 5 seconds, position drift must remain bounded under 2 cm
+        self.assertLess(np.linalg.norm(estimator.state.p[:2]), 0.02)
+        # Velocity must be zeroed by ZUPT
+        np.testing.assert_array_equal(estimator.state.v, np.zeros(3))
+        # ba must have adapted towards true bias
+        self.assertGreater(estimator.state.ba[0], 0.01)
+        self.assertGreater(estimator.state.ba[1], 0.01)
+
+    def test_zupt_adapts_3d_bias_and_bounds_drift(self):
+        """ZUPT Kalman update adapts ba in 3D (including Z) and bounds 3D position drift."""
+        estimator = ESIKFStateEstimator()
+        dt = 0.033  # ~30 Hz
+        true_bias = np.array([0.02, 0.03, 0.04])
+
+        for cycle in range(5):
+            for _ in range(30):
+                gyro = np.zeros(3)
+                accel = true_bias + np.random.normal(0, 0.005, 3)
+                estimator.predict((gyro, accel), dt)
+            estimator.zupt_update()
+
+        # 3D position drift must remain bounded under 3 cm
+        self.assertLess(np.linalg.norm(estimator.state.p), 0.03)
+        np.testing.assert_array_equal(estimator.state.v, np.zeros(3))
+        # ba must have adapted towards true bias in all 3 axes
+        self.assertGreater(estimator.state.ba[0], 0.01)
+        self.assertGreater(estimator.state.ba[1], 0.01)
+        self.assertGreater(estimator.state.ba[2], 0.01)
+
+    def test_stationary_map_updates_naturally_saturate_voxels(self):
+        """Stationary scans naturally populate unfilled voxels without exceeding capacity."""
+        lidar_map = Map()
+        # Simulate 10 scans of 50 stationary points in the same area
+        stationary_points = np.random.uniform(0.1, 0.4, (50, 3))
+        for _ in range(10):
+            lidar_map.add_points(stationary_points)
+
+        # Total points in any single voxel should not exceed max_points_per_voxel (20)
+        for key, voxel in lidar_map.voxel_map.items():
+            self.assertLessEqual(len(voxel["lidar"]), lidar_map.max_points_per_voxel)
 
 
 if __name__ == "__main__":
