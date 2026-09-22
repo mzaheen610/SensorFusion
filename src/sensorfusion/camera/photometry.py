@@ -204,7 +204,7 @@ def camera_thread(cam, state_lock, buffer_lock, filter, map, imu_state_buffer, c
             # Compute information matrices directly (Avoids massive NxN matrices)
             weight = 1.0 / (sigma_camera**2)
             S_inv = P_inv + weight * (H.T @ H)
-            b = weight * (H.T @ r)
+            b = -weight * (H.T @ r)
 
             # Solve for error state dx
             dx = np.linalg.solve(S_inv, b)

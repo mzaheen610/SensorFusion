@@ -144,7 +144,6 @@ if __name__ == "__main__":
     print("Mean stationary residual:", mean_residual)
     # Apply measured stationary residual into accelerometer bias
     filter.state.ba += filter.state.R.T @ mean_residual
-    filter.P[12:15, 12:15] = 1e-8 * np.eye(3)
     print("Calibrated ba:", filter.state.ba)
     
     lidar_prev_scan_time = {"time": time.monotonic()}
