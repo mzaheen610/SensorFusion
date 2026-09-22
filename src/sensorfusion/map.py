@@ -1,5 +1,4 @@
-"""Map implementation for the sensor fusion system."""
-
+import threading
 from scipy.spatial import KDTree
 import numpy as np
 
@@ -28,66 +27,70 @@ Implementing a simple python dict based voxel hash map for the LiDAR + Camera fu
 """
 class Map:
     def __init__(self):
+        self.lock = threading.RLock()
         self.voxel_map = {}
         self.voxel_size = 0.5
         self.max_points_per_voxel = 20
+
     def num_points(self):
-        count = 0
-        for key in self.voxel_map.keys():
-            count += len(self.voxel_map[key]["lidar"])
-        return count
+        with self.lock:
+            count = 0
+            for key in self.voxel_map.keys():
+                count += len(self.voxel_map[key]["lidar"])
+            return count
     
     def is_empty(self):
-        if not self.voxel_map:
-            return True
-        return False
+        with self.lock:
+            return not bool(self.voxel_map)
     
     def add_points(self, points):
         #add lidar points to the voxel map
-        for point in points:
-            key = self.get_voxel_key(point)
-            if key not in self.voxel_map:
-                self.voxel_map[key]= {
-                    "lidar": [],
-                    "image": [],
-                    "color": []
-                }
-            voxel = self.voxel_map[key]
-            #cap the points in a voxel to bound the map size
-            if len(voxel["lidar"]) < self.max_points_per_voxel:   
-                voxel["lidar"].append(point)
-                voxel["color"].append(np.array([128.0, 128.0, 128.0]))  # placeholder gray
-                voxel["image"].append(None)  #store image patch per point
+        with self.lock:
+            for point in points:
+                key = self.get_voxel_key(point)
+                if key not in self.voxel_map:
+                    self.voxel_map[key]= {
+                        "lidar": [],
+                        "image": [],
+                        "color": []
+                    }
+                voxel = self.voxel_map[key]
+                #cap the points in a voxel to bound the map size
+                if len(voxel["lidar"]) < self.max_points_per_voxel:   
+                    voxel["lidar"].append(point)
+                    voxel["color"].append(np.array([128.0, 128.0, 128.0]))  # placeholder gray
+                    voxel["image"].append(None)  #store image patch per point
 
-            
     def query(self, point, min_points_in_voxel=10, radius_voxels=1):
         # Find neighbors from the current voxel first.
         # Expand to adjacent voxels only when the current voxel is sparse.
-        key = self.get_voxel_key(point)
-        voxel = self.voxel_map.get(key, None)
+        with self.lock:
+            key = self.get_voxel_key(point)
+            voxel = self.voxel_map.get(key, None)
 
-        if voxel is None:
-            current_points = []
-        else:
-            current_points = voxel["lidar"]
+            if voxel is None:
+                current_points = []
+            else:
+                current_points = list(voxel["lidar"])
 
-        if len(current_points) >= min_points_in_voxel:
-            neighbors = np.asarray(current_points)
-            distances = np.linalg.norm(neighbors - np.asarray(point), axis=1)
-            return neighbors[np.argsort(distances)[:min_points_in_voxel * 2]]
+            if len(current_points) >= min_points_in_voxel:
+                neighbors = np.asarray(current_points)
+                distances = np.linalg.norm(neighbors - np.asarray(point), axis=1)
+                return neighbors[np.argsort(distances)[:min_points_in_voxel * 2]]
 
-        neighbors = list(current_points)
-        for dx in range(-radius_voxels, radius_voxels + 1):
-            for dy in range(-radius_voxels, radius_voxels + 1):
-                for dz in range(-radius_voxels, radius_voxels + 1):
-                    if dx == 0 and dy == 0 and dz == 0:
-                        continue
-                    nkey = (key[0] + dx, key[1] + dy, key[2] + dz)
-                    nvoxel = self.voxel_map.get(nkey, None)
-                    if nvoxel is not None and nvoxel["lidar"]:
-                        neighbors.extend(nvoxel["lidar"])
-                        if len(neighbors) >= min_points_in_voxel * 2:
-                            break  #stop early once we have enough points
+            neighbors = list(current_points)
+            for dx in range(-radius_voxels, radius_voxels + 1):
+                for dy in range(-radius_voxels, radius_voxels + 1):
+                    for dz in range(-radius_voxels, radius_voxels + 1):
+                        if dx == 0 and dy == 0 and dz == 0:
+                            continue
+                        nkey = (key[0] + dx, key[1] + dy, key[2] + dz)
+                        nvoxel = self.voxel_map.get(nkey, None)
+                        if nvoxel is not None and nvoxel["lidar"]:
+                            neighbors.extend(nvoxel["lidar"])
+                            if len(neighbors) >= min_points_in_voxel * 2:
+                                break  #stop early once we have enough points
+
         if len(neighbors) == 0:
             return None
 
@@ -136,8 +139,15 @@ class Map:
     #         visual_map_points.extend(voxel_points)
     #     return visual_map_points
     def query_visible_voxels(self, current_scan, state):
-        if not self.voxel_map:
-            return []
+        with self.lock:
+            if not self.voxel_map:
+                return []
+            # Snapshot voxels under the lock to prevent RuntimeError: dictionary changed size during iteration
+            voxel_snapshot = [
+                (key, list(voxel["lidar"]))
+                for key, voxel in self.voxel_map.items()
+                if voxel["lidar"]
+            ]
 
         visible_points = []
         robot_pos = state.p
@@ -145,9 +155,7 @@ class Map:
         # (Assuming IMU X-axis is the forward direction)
         forward_vector = state.R @ np.array([1.0, 0.0, 0.0])
 
-        for key, voxel in self.voxel_map.items():
-            if not voxel["lidar"]:
-                continue
+        for key, points in voxel_snapshot:
             # Approximate the center coordinate of this voxel
             voxel_center = np.array(key) * self.voxel_size + (self.voxel_size / 2.0)
             vector_to_voxel = voxel_center - robot_pos
@@ -159,7 +167,7 @@ class Map:
                 # A dot product > -0.2 gives us a nice wide 180+ degree hemisphere in front of the robot.
                 # The exact camera FOV bounds will be handled safely by project_points_to_frame.
                 if distance < self.voxel_size or np.dot(vector_to_voxel / distance, forward_vector) > -0.2:
-                    visible_points.extend(voxel["lidar"])
+                    visible_points.extend(points)
 
         return visible_points
 
@@ -168,44 +176,49 @@ class Map:
         for i, p in enumerate(voxel["lidar"]):
             if np.array_equal(p, point):
                 return i
+        return None
     
     def add_visual_patch(self, point, patch):
         #add/attach the visual patch to the lidar point in the global map
-        key = self.get_voxel_key(point)
-        voxel = self.voxel_map.get(key)
-        if voxel is None:
-            return
-        index = self.get_point_index(point, voxel)
-        if index is None or voxel["image"][index] is not None:
-            return
-        voxel["image"][index] = patch
+        with self.lock:
+            key = self.get_voxel_key(point)
+            voxel = self.voxel_map.get(key)
+            if voxel is None:
+                return
+            index = self.get_point_index(point, voxel)
+            if index is None or voxel["image"][index] is not None:
+                return
+            voxel["image"][index] = patch
 
     def get_reference_patch(self, point):
         #choose one image patch as the reference for now
         #will need to find the best patch for reference after score calculation(viewing angle, similarity based) later
-        key = self.get_voxel_key(point)
-        voxel = self.voxel_map.get(key)
-        if voxel is None:
-            return None
-        index = self.get_point_index(point, voxel)
-        if index is None or voxel["image"][index] is None:
-            return None
-        return voxel["image"][index]
+        with self.lock:
+            key = self.get_voxel_key(point)
+            voxel = self.voxel_map.get(key)
+            if voxel is None:
+                return None
+            index = self.get_point_index(point, voxel)
+            if index is None or voxel["image"][index] is None:
+                return None
+            return voxel["image"][index]
 
     def set_point_color(self, point, color):
         #attach the color to the map point
-        key = self.get_voxel_key(point)
-        voxel = self.voxel_map.get(key)
-        if voxel is None:
-            return
-        # match the exact point object/coords to its index in voxel["lidar"]
-        index = self.get_point_index(point, voxel)
-        if index is not None:
-            voxel["color"][index] = color
+        with self.lock:
+            key = self.get_voxel_key(point)
+            voxel = self.voxel_map.get(key)
+            if voxel is None:
+                return
+            # match the exact point object/coords to its index in voxel["lidar"]
+            index = self.get_point_index(point, voxel)
+            if index is not None:
+                voxel["color"][index] = color
 
     def get_all_points_and_colors(self):
         pts, cols = [], []
-        for voxel in self.voxel_map.values():
-            pts.extend(voxel["lidar"])
-            cols.extend(voxel["color"])
+        with self.lock:
+            for voxel in self.voxel_map.values():
+                pts.extend(voxel["lidar"])
+                cols.extend(voxel["color"])
         return np.array(pts), np.array(cols)
