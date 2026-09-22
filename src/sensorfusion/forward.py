@@ -289,9 +289,9 @@ class ESIKFStateEstimator:
                         np.zeros(3),  # gravity  
                     ])
                     # Compute a dynamic residual gate based on pose uncertainity
-                    innovation_var = H_k @ P_copy @ H_k.T + sigma_lidar**2
-                    k=4
-                    gate = max(0.35, k * np.sqrt(innovation_var))   # Wide enough to pull back drifted poses without rejection
+                    innovation_var = float(H_k @ P_copy @ H_k.T + sigma_lidar**2)
+                    k = 4
+                    gate = max(0.35, k * np.sqrt(max(1e-9, innovation_var)))   # Wide enough to pull back drifted poses without rejection
                     if DEBUG_LIDAR:
                         print("Residual gate value:", gate)
                     if abs(res) > gate:

@@ -9,6 +9,7 @@ from utils.so3_rotation import skew, exp
 from utils.projections import project_points_to_frame, project_points_world, calculate_photometric_error
 from threading import Thread,Lock
 from multiprocessing import Process, Queue
+from queue import Empty
 from collections import deque
 import copy
 from utils.map_stream import tcp_stream_thread
@@ -142,7 +143,12 @@ if __name__ == "__main__":
         daemon=True,
     )
     lidar_acquisition_worker.start()
-    time.sleep(3.0)  # Wait for motor to spin up so calibration captures motor vibration baseline
+    print("Waiting for LiDAR to connect and stream first scan...")
+    try:
+        lidar_scan_queue.get(timeout=15.0)
+        print("LiDAR ready and streaming.")
+    except Exception as e:
+        print(f"Warning: LiDAR wait timed out or failed: {e}")
 
     """
     Initial imu residual calculation (absorbs silicon bias + motor vibration baseline)
@@ -163,6 +169,13 @@ if __name__ == "__main__":
     filter.state.ba += filter.state.R.T @ mean_residual
     filter.P[12:15, 12:15] = 1e-8 * np.eye(3)
     print("Calibrated ba:", filter.state.ba)
+
+    # Drain any scans buffered during calibration so workers start synchronized with fresh data
+    while not lidar_scan_queue.empty():
+        try:
+            lidar_scan_queue.get_nowait()
+        except Empty:
+            break
 
     # Clean zero-point initialization before launching workers
     filter.state.p = np.zeros(3)
