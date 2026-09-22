@@ -165,7 +165,11 @@ class ESIKFStateEstimator:
             T_GI_init[:3, :3] = state.R
             T_GI_init[:3, 3] = state.p
 
-            for point_lidar in lidar_points_compensated:
+            #downsample the lidar points to reduce computational load
+            # Downsample by striding every 2nd point (70 well-distributed points instead of 140)
+            points_to_associate = lidar_points_compensated[::2]
+
+            for point_lidar in points_to_associate:
                 # Transform each point from lidar frame to the world frame based on current pose
                 point = T_GI_init @ lidar_imu_extrinsic @ np.append(point_lidar, 1)
                 point_world_coords = point[:3]
@@ -231,7 +235,7 @@ class ESIKFStateEstimator:
             sigma_lidar = 0.02
             correction_applied = False
             self.last_lidar_association_count = len(valid_associations)
-            max_iterations = 3
+            max_iterations = 2
             try:
                 P_inv = np.linalg.inv(P_copy)
             except np.linalg.LinAlgError:
