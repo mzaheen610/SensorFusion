@@ -127,8 +127,25 @@ if __name__ == "__main__":
     print("World accel corrected:", a_world_corrected)
     print("Linear world acceleration:", linear_accel_world)
 
+    lidar_prev_scan_time = {"time": time.monotonic()}
+    # A single-slot queue prevents slow scan processing from allowing serial
+    # data to backlog; the acquisition worker always retains the latest scan.
+    lidar_scan_queue = Queue(maxsize=1) #queue to store the lidar scans
+    camera_scan_queue = Queue(maxsize=1)
+
     """
-    Initial imu residual calculation
+    Start Lidar scan acquisition process and allow motor to reach operating speed
+    """
+    lidar_acquisition_worker = Process(
+        target=lidar_acquisition_process,
+        args=("/dev/ttyUSB0", lidar_scan_queue),
+        daemon=True,
+    )
+    lidar_acquisition_worker.start()
+    time.sleep(3.0)  # Wait for motor to spin up so calibration captures motor vibration baseline
+
+    """
+    Initial imu residual calculation (absorbs silicon bias + motor vibration baseline)
     """
     residuals = []
     for _ in range(100):
@@ -144,24 +161,12 @@ if __name__ == "__main__":
     print("Mean stationary residual:", mean_residual)
     # Apply measured stationary residual into accelerometer bias
     filter.state.ba += filter.state.R.T @ mean_residual
+    filter.P[12:15, 12:15] = 1e-8 * np.eye(3)
     print("Calibrated ba:", filter.state.ba)
-    
-    lidar_prev_scan_time = {"time": time.monotonic()}
-    # A single-slot queue prevents slow scan processing from allowing serial
-    # data to backlog; the acquisition worker always retains the latest scan.
-    lidar_scan_queue = Queue(maxsize=1) #queue to store the lidar scans
-    camera_scan_queue = Queue(maxsize=1)
 
-    """
-    Start Lidar scan acquisition process
-    """
-    lidar_acquisition_worker = Process(
-        target=lidar_acquisition_process,
-        args=("/dev/ttyUSB0", lidar_scan_queue),
-        daemon=True,
-    )
-    lidar_acquisition_worker.start()
-
+    # Clean zero-point initialization before launching workers
+    filter.state.p = np.zeros(3)
+    filter.state.v = np.zeros(3)
 
     """
     Starting the IMU thread - data acquisition and forward propogation
@@ -187,28 +192,6 @@ if __name__ == "__main__":
         daemon=True,
     )
     camera_worker.start()
-
-    time.sleep(10) #wait for the lidar process to initialize properly
-
-    # Re-calibrate accelerometer bias with LiDAR motor running to absorb motor vibration baseline
-    motor_residuals = []
-    for _ in range(100):
-        reading = imu.get_readings()
-        if reading is not None:
-            _, accel, _ = reading
-            motor_residuals.append(
-                filter.state.R @ (accel - filter.state.ba) - filter.state.g
-            )
-        time.sleep(0.01)
-    if motor_residuals:
-        motor_mean = np.mean(motor_residuals, axis=0)
-        filter.state.ba += filter.state.R.T @ motor_mean
-        print("Post-spinup calibrated ba:", filter.state.ba)
-
-    # Reset position and velocity after the 10s motor spinup to prevent open-loop accumulation
-    with state_lock:
-        filter.state.p = np.zeros(3)
-        filter.state.v = np.zeros(3)
 
     stream_thread = Thread(
         target=tcp_stream_thread,

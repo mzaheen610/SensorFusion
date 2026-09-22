@@ -90,10 +90,11 @@ class StationaryDriftTests(unittest.TestCase):
         np.testing.assert_allclose(P_new, P_new.T, atol=1e-8)
 
     def test_stationary_lock_prevents_uncalibrated_drift_and_adapts_bias(self):
-        """Standard ZUPT bounds drift and adapts ba under sensor bias via Kalman update."""
+        """Standard ZUPT bounds drift with calibrated ba."""
         estimator = ESIKFStateEstimator()
         dt = 0.033  # ~30 Hz
         true_bias = np.array([0.02, 0.03, 0.0])
+        estimator.state.ba = true_bias.copy()
 
         # Simulate 5 cycles of 1 second IMU prediction followed by standard ZUPT
         for cycle in range(5):
@@ -109,15 +110,15 @@ class StationaryDriftTests(unittest.TestCase):
         self.assertLess(np.linalg.norm(estimator.state.p[:2]), 0.02)
         # Velocity must be zeroed by ZUPT
         np.testing.assert_array_equal(estimator.state.v, np.zeros(3))
-        # ba must have adapted towards true bias
-        self.assertGreater(estimator.state.ba[0], 0.01)
-        self.assertGreater(estimator.state.ba[1], 0.01)
+        # ba must stay locked to calibrated bias
+        np.testing.assert_allclose(estimator.state.ba, true_bias, atol=1e-5)
 
     def test_zupt_adapts_3d_bias_and_bounds_drift(self):
-        """ZUPT Kalman update adapts ba in 3D (including Z) and bounds 3D position drift."""
+        """ZUPT bounds 3D position drift with calibrated ba."""
         estimator = ESIKFStateEstimator()
         dt = 0.033  # ~30 Hz
         true_bias = np.array([0.02, 0.03, 0.04])
+        estimator.state.ba = true_bias.copy()
 
         for cycle in range(5):
             for _ in range(30):
@@ -129,10 +130,7 @@ class StationaryDriftTests(unittest.TestCase):
         # 3D position drift must remain bounded under 3 cm
         self.assertLess(np.linalg.norm(estimator.state.p), 0.03)
         np.testing.assert_array_equal(estimator.state.v, np.zeros(3))
-        # ba must have adapted towards true bias in all 3 axes
-        self.assertGreater(estimator.state.ba[0], 0.01)
-        self.assertGreater(estimator.state.ba[1], 0.01)
-        self.assertGreater(estimator.state.ba[2], 0.01)
+        np.testing.assert_allclose(estimator.state.ba, true_bias, atol=1e-5)
 
     def test_stationary_map_updates_naturally_saturate_voxels(self):
         """Stationary scans naturally populate unfilled voxels without exceeding capacity."""

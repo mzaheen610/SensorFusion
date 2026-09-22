@@ -25,11 +25,12 @@ class State:
 class ESIKFStateEstimator:
     def __init__(self):
         self.P = 1 * np.eye(18) # process covariance matrix
+        self.P[12:15, 12:15] = 1e-8 * np.eye(3) # Initial accel bias covariance
         self.q_rot = 1e-3      # rad^2/s -- gyro noise density
         self.q_pos = 1e-5      # m^2/s (loosely, position integrates velocity)
         self.q_vel = 5e-3      # (m/s)^2/s -- accel noise density
         self.q_gyro_bias = 1e-8   # rad^2/s -- gyro bias random walk (slow)
-        self.q_accel_bias = 1e-4  # (m/s^2)^2/s -- accel bias random walk allows ZUPT to track bias
+        self.q_accel_bias = 1e-12  # (m/s^2)^2/s -- quasi-static; prevents null-space random walk
         self.q_gravity = 0.0      # frozen; gravity removed onboard BNO055
         self.R = np.eye(3) # measurement matrix
         dt = 0.01  # IMU is at 100Hz, so time step is 0.01 seconds
@@ -487,6 +488,7 @@ class ESIKFStateEstimator:
 
         dx[0:3]   = 0.0  # Attitude is unobservable from velocity in the absence of gravity
         dx[9:12]  = 0.0  # Gyro bias is unobservable from velocity
+        dx[12:15] = 0.0  # Accel bias is unobservable; preserve calibrated bias
         dx[15:18] = 0.0  # Gravity is frozen
 
         theta_rot = dx[0:3]
