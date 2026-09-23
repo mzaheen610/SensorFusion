@@ -153,22 +153,17 @@ if __name__ == "__main__":
     """
     Initial imu residual calculation (absorbs silicon bias + motor vibration baseline)
     """
-    residuals = []
+    accel_samples = []
     for _ in range(100):
         reading = imu.get_readings()
         if reading is not None:
             _, accel, _ = reading
-            residuals.append(
-                filter.state.R @ (accel - filter.state.ba)
-                - filter.state.g
-            )
+            accel_samples.append(accel)
         time.sleep(0.01)
-    mean_residual = np.mean(residuals, axis=0) if residuals else np.zeros(3)
-    print("Mean stationary residual:", mean_residual)
-    # Apply measured stationary residual into accelerometer bias
-    filter.state.ba += filter.state.R.T @ mean_residual
+    if accel_samples:
+        filter.state.ba = np.mean(accel_samples, axis=0)
     filter.P[12:15, 12:15] = 1e-8 * np.eye(3)
-    print("Calibrated ba:", filter.state.ba)
+    print("Calibrated ba (body linear_accel baseline):", filter.state.ba)
 
     # Drain any scans buffered during calibration so workers start synchronized with fresh data
     while not lidar_scan_queue.empty():

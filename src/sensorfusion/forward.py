@@ -365,19 +365,16 @@ class ESIKFStateEstimator:
 
                 max_rotation_correction = np.deg2rad(15.0)
                 max_position_correction = 1.0
-                max_velocity_correction = 0.3 #m/s tune to the platforms max vel
                 if (
                     not np.all(np.isfinite(dx))
                     or np.linalg.norm(dx[0:3]) > max_rotation_correction
                     or np.linalg.norm(dx[3:6]) > max_position_correction
-                    or np.linalg.norm(dx[6:9]) > max_velocity_correction
                 ):
                     if DEBUG_LIDAR:
                         print(
                             "Rejecting implausible correction: "
                             f"rotation={np.linalg.norm(dx[0:3]):.3f} "
                             f"position={np.linalg.norm(dx[3:6]):.3f}"
-                            f"velocity={np.linalg.norm(dx[6:9]):.3f}"
                         )
                     correction_applied = False
                     break
@@ -487,6 +484,7 @@ class ESIKFStateEstimator:
             )
 
         dx[0:3]   = 0.0  # Attitude is unobservable from velocity in the absence of gravity
+        dx[3:6]   = 0.0  # Position is unobservable from zero-velocity measurement
         dx[9:12]  = 0.0  # Gyro bias is unobservable from velocity
         dx[12:15] = 0.0  # Accel bias is unobservable; preserve calibrated bias
         dx[15:18] = 0.0  # Gravity is frozen
