@@ -235,6 +235,7 @@ def camera_thread(cam, state_lock, buffer_lock, filter, map, imu_state_buffer, c
                     )
                 continue
             
+            dx[5]     = 0.0  # Zero out Z translation (camera cannot observe vertical heave on planar points)
             dx[6:9]   = 0.0  # Zero out velocity (camera cannot observe velocity directly)
             dx[9:12]  = 0.0  # Zero out gyro bias
             dx[12:15] = 0.0  # Zero out accel bias (STOPS ACCEL BIAS RUNAWAY!)

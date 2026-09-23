@@ -103,6 +103,8 @@ class ESIKFStateEstimator:
         self.state.R = reorthonormalize(self.state.R) # prevent det(R) runaway
         self.state.p += (self.state.v * dt) + (0.5 * accel * dt * dt) 
         self.state.v += accel * dt
+        self.state.p[2] = 0.0  # Planar robot constraint: 2D motion on ground/table
+        self.state.v[2] = 0.0  # Zero unobservable vertical velocity
 
         #Covariance update
         self.P = A @ self.P @ A.T + self.compute_process_noise(dt)
@@ -493,6 +495,7 @@ class ESIKFStateEstimator:
         state.R = state.R @ exp(theta_rot)
         state.R = reorthonormalize(state.R)
         state.p  += dx[3:6]
+        state.p[2] = 0.0  # Planar robot constraint: ground plane height
         state.v   = np.zeros(3)  # Platform is stationary, eliminate residual velocity
         state.bg += dx[9:12]
         state.ba += dx[12:15]
