@@ -12,7 +12,7 @@ from utils.so3_rotation import skew, exp, reorthonormalize
 import cv2
 import copy
 
-DEBUG_CAMERA = True
+DEBUG_CAMERA = False
 def camera_thread(cam, state_lock, buffer_lock, filter, map, imu_state_buffer, camera_scan_queue):
 
     # --- Rate Tracking Initialization ---
@@ -47,8 +47,9 @@ def camera_thread(cam, state_lock, buffer_lock, filter, map, imu_state_buffer, c
                 pass
 
             if latest_scan is None or latest_scan_time is None or time.monotonic() - latest_scan_time > 0.8:
-                cv2.imshow("Camera View (Lidar Projected)", display_frame) #show empty frame if lidar data is missing
-                cv2.waitKey(1)
+                if DEBUG_CAMERA:
+                    cv2.imshow("Camera View (Lidar Projected)", display_frame) #show empty frame if lidar data is missing
+                    cv2.waitKey(1)
                 time.sleep(0.01)
                 continue
 
@@ -59,8 +60,9 @@ def camera_thread(cam, state_lock, buffer_lock, filter, map, imu_state_buffer, c
                     None,
                 )
             if state_item is None:
-                cv2.imshow("Camera View (Lidar Projected)", display_frame)
-                cv2.waitKey(1)
+                if DEBUG_CAMERA:
+                    cv2.imshow("Camera View (Lidar Projected)", display_frame)
+                    cv2.waitKey(1)
                 time.sleep(0.01)
                 continue
 
@@ -136,10 +138,11 @@ def camera_thread(cam, state_lock, buffer_lock, filter, map, imu_state_buffer, c
                         or u - 4 < 0 or u + 4 > frame.shape[1]):
                     continue
 
-                #Live visualization of the lidar projected pixels on the camera frame
-                cv2.circle(display_frame, (u,v), radius=2, color=(0, 255,0), thickness=-1)
-                #draw the patch surrounding the pixels
-                cv2.rectangle(display_frame, (u-4, v-4), (u+4, v+4), color=(0, 0, 255), thickness=1)
+                if DEBUG_CAMERA:
+                    #Live visualization of the lidar projected pixels on the camera frame
+                    cv2.circle(display_frame, (u,v), radius=2, color=(0, 255,0), thickness=-1)
+                    #draw the patch surrounding the pixels
+                    cv2.rectangle(display_frame, (u-4, v-4), (u+4, v+4), color=(0, 0, 255), thickness=1)
                 #add the pixel color to the map point
                 color = frame[v,u]
                 map.set_point_color(point[0], color)
@@ -184,8 +187,9 @@ def camera_thread(cam, state_lock, buffer_lock, filter, map, imu_state_buffer, c
                 residual_list.extend(np.asarray(residual).ravel())
 
             #update the Live Window GUI
-            cv2.imshow("Camera View (Lidar Projected)", display_frame)
-            cv2.waitKey(1)
+            if DEBUG_CAMERA:
+                cv2.imshow("Camera View (Lidar Projected)", display_frame)
+                cv2.waitKey(1)
 
             #do the camera based update using the residual and Kalman Gain
             # with state_lock:
