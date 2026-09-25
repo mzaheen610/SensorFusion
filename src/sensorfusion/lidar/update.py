@@ -97,8 +97,8 @@ def lidar_thread(state_lock, buffer_lock, filter, map, imu_measurement_buffer,
 
     prev_scan_bins = None
     static_count = 0
-    ZUPT_CONSECUTIVE_REQUIRED = 5
-    ZUPT_DIST_THRESHOLD_MM = 25  # mm (85th percentile threshold)
+    ZUPT_CONSECUTIVE_REQUIRED = 3
+    ZUPT_DIST_THRESHOLD_MM = 45  # mm (85th percentile threshold)
     while True:
         try:
             scan_item = scan_queue.get()
@@ -237,16 +237,30 @@ def lidar_thread(state_lock, buffer_lock, filter, map, imu_measurement_buffer,
 
                     # IMU motion check over the scan interval (recent samples)
                     is_imu_static = True
+                    gyro_max = 0.0
+                    accel_var = 0.0
                     if imu_buffer:
-                        recent_imu = [m for m in imu_buffer if m[0] >= scan_timestamp - 0.25]
+                        recent_imu = [
+                            m for m in imu_buffer
+                            if scan_timestamp - 0.30 <= m[0] <= scan_timestamp + 0.05
+                        ]
+                        if len(recent_imu) < 3:
+                            recent_imu = imu_buffer[-10:]
                         if len(recent_imu) >= 3:
                             gyros = np.array([m[1] for m in recent_imu])
                             accels = np.array([m[2] for m in recent_imu])
+                            gyro_max = float(np.max(np.linalg.norm(gyros, axis=1)))
+                            accel_var = float(np.var(np.linalg.norm(accels, axis=1)))
                             # Moving if angular speed > 0.08 rad/s (~4.5 deg/s) or accel magnitude variance > 0.05 (m/s^2)^2
-                            if np.max(np.linalg.norm(gyros, axis=1)) > 0.08 or np.var(np.linalg.norm(accels, axis=1)) > 0.05:
+                            if gyro_max > 0.08 or accel_var > 0.05:
                                 is_imu_static = False
 
-                    if sim is not None and sim < ZUPT_DIST_THRESHOLD_MM and is_imu_static:
+                    print(
+                        f"IMU static check: is_static={is_imu_static} "
+                        f"(max_gyro={gyro_max:.4f} rad/s, accel_var={accel_var:.5f})"
+                    )
+
+                    if is_imu_static:
                         static_count += 1
                     else:
                         static_count = 0
