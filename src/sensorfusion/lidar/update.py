@@ -97,7 +97,7 @@ def lidar_thread(state_lock, buffer_lock, filter, map, imu_measurement_buffer,
 
     prev_scan_bins = None
     static_count = 0
-    ZUPT_CONSECUTIVE_REQUIRED = 3
+    ZUPT_CONSECUTIVE_REQUIRED = 2
     ZUPT_DIST_THRESHOLD_MM = 45  # mm (85th percentile threshold)
     while True:
         try:
@@ -251,8 +251,9 @@ def lidar_thread(state_lock, buffer_lock, filter, map, imu_measurement_buffer,
                             accels = np.array([m[2] for m in recent_imu])
                             gyro_max = float(np.max(np.linalg.norm(gyros, axis=1)))
                             accel_var = float(np.var(np.linalg.norm(accels, axis=1)))
-                            # Moving if angular speed > 0.08 rad/s (~4.5 deg/s) or accel magnitude variance > 0.05 (m/s^2)^2
-                            if gyro_max > 0.08 or accel_var > 0.05:
+                            # Moving if angular speed > 0.12 rad/s (~6.9 deg/s) or accel magnitude variance > 0.08 (m/s^2)^2.
+                            # Threshold accommodates the ~0.085 rad/s motor vibration floor from the spinning RPLidar.
+                            if gyro_max > 0.12 or accel_var > 0.08:
                                 is_imu_static = False
 
                     print(
@@ -268,8 +269,7 @@ def lidar_thread(state_lock, buffer_lock, filter, map, imu_measurement_buffer,
                 if static_count >= ZUPT_CONSECUTIVE_REQUIRED:
                     filter.zupt_update()
                     filter.state.v = np.zeros(3)
-                    if DEBUG_LIDAR:
-                        print(f"ZUPT applied | static_count={static_count}")
+                    print(f"ZUPT applied | static_count={static_count}", flush=True)
 
             #DEBUG THE LIDAR SCAN AND EKF UPDATE RATE  
             report_time = time.monotonic()

@@ -29,10 +29,11 @@ class CovarianceConsistencyTests(unittest.TestCase):
 
         estimator.zupt_update(sigma_zupt=0.05)
 
-        # Attitude, position, and gyro bias covariances must be identical (not shrunk)
+        # Attitude, position, gyro bias, and accel bias covariances must be identical (not shrunk)
         np.testing.assert_allclose(estimator.P[0:3, 0:3], P_before[0:3, 0:3], atol=1e-12)
         np.testing.assert_allclose(estimator.P[3:6, 3:6], P_before[3:6, 3:6], atol=1e-12)
         np.testing.assert_allclose(estimator.P[9:12, 9:12], P_before[9:12, 9:12], atol=1e-12)
+        np.testing.assert_allclose(estimator.P[12:15, 12:15], P_before[12:15, 12:15], atol=1e-12)
         np.testing.assert_allclose(estimator.P[15:18, 15:18], P_before[15:18, 15:18], atol=1e-12)
 
         # Velocity covariance must be reduced by measurement
@@ -55,7 +56,7 @@ class CovarianceConsistencyTests(unittest.TestCase):
         self.assertGreater(np.linalg.norm(estimator.state.v[:2]), 0.03)
 
         ba_before = estimator.state.ba.copy()
-        estimator.zupt_update(sigma_zupt=0.05)
+        estimator.zupt_update(sigma_zupt=0.05, adapt_ba=True)
 
         # ba must have adapted in the direction of true_bias
         delta_ba = estimator.state.ba - ba_before

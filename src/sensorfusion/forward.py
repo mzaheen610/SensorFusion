@@ -455,10 +455,10 @@ class ESIKFStateEstimator:
 
         return None, False, P_copy
 
-    def zupt_update(self, sigma_zupt=0.05):
+    def zupt_update(self, sigma_zupt=0.05, adapt_ba=False):
         """
         Zero-velocity pseudo-measurement update. Call when LiDAR scan similarity
-        indicates the platform is stationary. Directly modifies self.state/self.P.
+        or IMU variance indicates the platform is stationary. Directly modifies self.state/self.P.
         """
         state = self.state
         H = np.zeros((3, 18))
@@ -474,6 +474,8 @@ class ESIKFStateEstimator:
         K[0:3, :]   = 0.0  # Attitude unobservable from velocity
         K[3:6, :]   = 0.0  # Position unobservable from zero-velocity measurement
         K[9:12, :]  = 0.0  # Gyro bias unobservable from velocity
+        if not adapt_ba:
+            K[12:15, :] = 0.0  # Accel bias unobservable without long-term tilt reference
         K[14, :]    = 0.0  # Z accel bias is planar locked
         K[15:18, :] = 0.0  # Gravity is frozen
 
@@ -481,15 +483,21 @@ class ESIKFStateEstimator:
         dx[0:3]   = 0.0
         dx[3:6]   = 0.0
         dx[9:12]  = 0.0
+        if not adapt_ba:
+            dx[12:15] = 0.0
         dx[14]    = 0.0
         dx[15:18] = 0.0
 
         if not np.all(np.isfinite(dx)):
             return
 
-        # Slew-rate limit on accel bias correction per ZUPT cycle (max 5 cm/s^2)
-        max_ba_step = 0.05
-        dx[12:15] = np.clip(dx[12:15], -max_ba_step, max_ba_step)
+        if adapt_ba:
+            # Slew-rate limit on accel bias correction per ZUPT cycle (max 1 cm/s^2)
+            max_ba_step = 0.01
+            dx[12:15] = np.clip(dx[12:15], -max_ba_step, max_ba_step)
+            state.ba += dx[12:15]
+            # Hard magnitude clamp on ba to prevent runaway
+            state.ba = np.clip(state.ba, -1.5, 1.5)
 
         if DEBUG_LIDAR:
             print(
@@ -501,9 +509,6 @@ class ESIKFStateEstimator:
 
         state.p[2] = 0.0  # Planar robot constraint: ground plane height
         state.v   = np.zeros(3)  # Platform is stationary, eliminate residual velocity
-        state.ba += dx[12:15]
-        # Hard magnitude clamp on ba to prevent runaway
-        state.ba = np.clip(state.ba, -1.5, 1.5)
         state.g[:] = 0.0
 
         # Joseph form covariance update
