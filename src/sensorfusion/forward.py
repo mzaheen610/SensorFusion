@@ -345,6 +345,7 @@ class ESIKFStateEstimator:
                     kalman_gain = np.linalg.pinv(H.T @ R_inv @ H + P_inv) @ (H.T @ R_inv)
 
                 # Zero out unobservable dimensions on kalman_gain BEFORE computing dx and BEFORE computing P_new:
+                kalman_gain[6:9, :]   = 0.0  # Velocity is unobservable from a position-only LiDAR update
                 kalman_gain[9:12, :]  = 0.0  # Prevent gyro bias corruption from scan matching noise
                 kalman_gain[12:15, :] = 0.0  # Accel bias is unobservable from LiDAR; lock to calibrated value (leave to ZUPT)
                 kalman_gain[15:18, :] = 0.0  # Gravity is frozen/unobservable
@@ -381,16 +382,10 @@ class ESIKFStateEstimator:
                 # Planar 2D robot constraints on state correction
                 dx[0:2]   = 0.0  # 2D planar LiDAR cannot observe roll/pitch
                 dx[5]     = 0.0  # 2D planar LiDAR cannot observe Z translation
-                dx[8]     = 0.0  # Z velocity is planar constrained
+                dx[6:9]   = 0.0  # Velocity is unobservable from position-only LiDAR update
                 dx[9:12]  = 0.0
                 dx[12:15] = 0.0
                 dx[15:18] = 0.0
-
-                # Clip horizontal velocity correction from scan matching to prevent jumps
-                max_vel_correction = 0.3  # m/s
-                vel_corr_norm = np.linalg.norm(dx[6:8])
-                if vel_corr_norm > max_vel_correction:
-                    dx[6:8] = (dx[6:8] / vel_corr_norm) * max_vel_correction
 
                 max_rotation_correction = np.deg2rad(15.0)
                 max_position_correction = 1.0

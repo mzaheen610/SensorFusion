@@ -98,7 +98,7 @@ def lidar_thread(state_lock, buffer_lock, filter, map, imu_measurement_buffer,
     prev_scan_bins = None
     static_count = 0
     ZUPT_CONSECUTIVE_REQUIRED = 5
-    ZUPT_DIST_THRESHOLD_MM = 50 #mm
+    ZUPT_DIST_THRESHOLD_MM = 25  # mm (85th percentile threshold)
     while True:
         try:
             scan_item = scan_queue.get()
@@ -234,7 +234,19 @@ def lidar_thread(state_lock, buffer_lock, filter, map, imu_measurement_buffer,
                 if prev_scan_bins is not None:
                     sim = scan_similarity(current_bins, prev_scan_bins)
                     print("Scan similarity between scans is:", sim)
-                    if sim is not None and sim < ZUPT_DIST_THRESHOLD_MM:
+
+                    # IMU motion check over the scan interval (recent samples)
+                    is_imu_static = True
+                    if imu_buffer:
+                        recent_imu = [m for m in imu_buffer if m[0] >= scan_timestamp - 0.25]
+                        if len(recent_imu) >= 3:
+                            gyros = np.array([m[1] for m in recent_imu])
+                            accels = np.array([m[2] for m in recent_imu])
+                            # Moving if angular speed > 0.08 rad/s (~4.5 deg/s) or accel magnitude variance > 0.05 (m/s^2)^2
+                            if np.max(np.linalg.norm(gyros, axis=1)) > 0.08 or np.var(np.linalg.norm(accels, axis=1)) > 0.05:
+                                is_imu_static = False
+
+                    if sim is not None and sim < ZUPT_DIST_THRESHOLD_MM and is_imu_static:
                         static_count += 1
                     else:
                         static_count = 0

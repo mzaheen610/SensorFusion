@@ -19,11 +19,14 @@ def scan_to_bins(scan):
         bins[idx] = dist  # last point in bin wins; fine for this coarse check
     return bins
 
-def scan_similarity(bins_a, bins_b):
+def scan_similarity(bins_a, bins_b, percentile=85):
     """
-    Find similarity between bins of two scans
+    Find similarity between bins of two scans using a high percentile (default 85th)
+    so that localized motion (e.g. a walking person or small platform translation)
+    is not hidden by static background walls.
     """
     valid = ~np.isnan(bins_a) & ~np.isnan(bins_b)
     if valid.sum() < MIN_VALID_BINS:
         return None  # not enough overlapping structure to judge
-    return float(np.median(np.abs(bins_a[valid] - bins_b[valid])))
+    diffs = np.abs(bins_a[valid] - bins_b[valid])
+    return float(np.percentile(diffs, percentile))

@@ -89,6 +89,7 @@ class CovarianceConsistencyTests(unittest.TestCase):
         )
 
         if applied:
+            np.testing.assert_allclose(P_new[6:9, 6:9], P_before[6:9, 6:9], atol=1e-12)
             np.testing.assert_allclose(P_new[9:12, 9:12], P_before[9:12, 9:12], atol=1e-12)
             np.testing.assert_allclose(P_new[12:15, 12:15], P_before[12:15, 12:15], atol=1e-12)
 
