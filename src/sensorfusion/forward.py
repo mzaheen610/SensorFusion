@@ -30,7 +30,7 @@ class ESIKFStateEstimator:
         self.q_pos = 1e-5      # m^2/s (loosely, position integrates velocity)
         self.q_vel = 5e-3      # (m/s)^2/s -- accel noise density
         self.q_gyro_bias = 1e-8   # rad^2/s -- gyro bias random walk (slow)
-        self.q_accel_bias = 1e-12  # (m/s^2)^2/s -- quasi-static; prevents null-space random walk
+        self.q_accel_bias = 1e-5  # (m/s^2)^2/s -- accel bias random walk (allows ZUPT adaptation)
         self.q_gravity = 0.0      # frozen; gravity removed onboard BNO055
         self.R = np.eye(3) # measurement matrix
         dt = 0.01  # IMU is at 100Hz, so time step is 0.01 seconds
@@ -105,6 +105,12 @@ class ESIKFStateEstimator:
         self.state.v += accel * dt
         self.state.p[2] = 0.0  # Planar robot constraint: 2D motion on ground/table
         self.state.v[2] = 0.0  # Zero unobservable vertical velocity
+
+        # Safety speed limit for physical platform
+        MAX_SPEED = 0.8  # m/s
+        speed_xy = float(np.linalg.norm(self.state.v[:2]))
+        if speed_xy > MAX_SPEED:
+            self.state.v[:2] = (self.state.v[:2] / speed_xy) * MAX_SPEED
 
         #Covariance update
         self.P = A @ self.P @ A.T + self.compute_process_noise(dt)
@@ -338,6 +344,11 @@ class ESIKFStateEstimator:
                 except np.linalg.LinAlgError:
                     kalman_gain = np.linalg.pinv(H.T @ R_inv @ H + P_inv) @ (H.T @ R_inv)
 
+                # Zero out unobservable dimensions on kalman_gain BEFORE computing dx and BEFORE computing P_new:
+                kalman_gain[9:12, :]  = 0.0  # Prevent gyro bias corruption from scan matching noise
+                kalman_gain[12:15, :] = 0.0  # Accel bias is unobservable from LiDAR; lock to calibrated value (leave to ZUPT)
+                kalman_gain[15:18, :] = 0.0  # Gravity is frozen/unobservable
+
                 # dx = kalman_gain @ r #error-state vector
                 dx_from_prior = state_error(state, state_0)
                 dx = kalman_gain @ r - (np.eye(18) - kalman_gain @ H) @ dx_from_prior
@@ -362,8 +373,24 @@ class ESIKFStateEstimator:
                     print("bg:", dx[9:12])
                     print("ba:", dx[12:15])
                     print("g:", dx[15:18])
+
+                # Check if the optimization step has converged before state projection
                 if np.linalg.norm(dx) < eps:
                     break
+
+                # Planar 2D robot constraints on state correction
+                dx[0:2]   = 0.0  # 2D planar LiDAR cannot observe roll/pitch
+                dx[5]     = 0.0  # 2D planar LiDAR cannot observe Z translation
+                dx[8]     = 0.0  # Z velocity is planar constrained
+                dx[9:12]  = 0.0
+                dx[12:15] = 0.0
+                dx[15:18] = 0.0
+
+                # Clip horizontal velocity correction from scan matching to prevent jumps
+                max_vel_correction = 0.3  # m/s
+                vel_corr_norm = np.linalg.norm(dx[6:8])
+                if vel_corr_norm > max_vel_correction:
+                    dx[6:8] = (dx[6:8] / vel_corr_norm) * max_vel_correction
 
                 max_rotation_correction = np.deg2rad(15.0)
                 max_position_correction = 1.0
@@ -381,18 +408,13 @@ class ESIKFStateEstimator:
                     correction_applied = False
                     break
 
-                dx[0:2]   = 0.0  # 2D planar LiDAR cannot observe roll or pitch; lock to horizontal
-                dx[5]     = 0.0  # 2D planar LiDAR cannot observe Z translation
-                dx[6:9]   = 0.0  # LiDAR cannot observe velocity; prevent cross-covariance artifacts
-                dx[9:12]  = 0.0  # Prevent gyro bias corruption from scan matching noise
-                dx[12:15] = 0.0  # Accel bias is unobservable from LiDAR; lock to calibrated value
-                dx[15:18] = 0.0  # Gravity is frozen/unobservable
-
                 theta_rot = dx[0:3]
                 state.R = state.R @ exp(theta_rot)
                 state.R = reorthonormalize(state.R)   # normalize the R matrix to prevent 
                 state.p  += dx[3:6]
+                state.p[2] = 0.0
                 state.v  += dx[6:9]
+                state.v[2] = 0.0
                 state.bg += dx[9:12]
                 state.ba += dx[12:15]
                 state.g[:] = 0.0
@@ -402,10 +424,10 @@ class ESIKFStateEstimator:
                     best_state = copy_state(state)
                     best_H = H.copy()
                     best_kalman_gain = kalman_gain.copy()
-                    # best_P_new = (np.eye(P_copy.shape[0]) - kalman_gain @ H) @ 
-                    #Joseph form covariance update to prevent collapse of P
+                    # Joseph form covariance update to prevent collapse of P
                     I_KH = np.eye(P_copy.shape[0]) - kalman_gain @ H
                     best_P_new = I_KH @ P_copy @ I_KH.T + kalman_gain @ (sigma_lidar**2 * np.eye(len(r))) @ kalman_gain.T
+                    best_P_new = 0.5 * (best_P_new + best_P_new.T)
                 if DEBUG_LIDAR:
                     print(
                         "LiDAR correction committed:",
@@ -452,57 +474,47 @@ class ESIKFStateEstimator:
         R_zupt = (sigma_zupt ** 2) * np.eye(3)
         S = H @ self.P @ H.T + R_zupt
         K = self.P @ H.T @ np.linalg.inv(S)
+
+        # Zero out blocked dimensions on K so covariance doesn't artificially shrink:
+        K[0:3, :]   = 0.0  # Attitude unobservable from velocity
+        K[3:6, :]   = 0.0  # Position unobservable from zero-velocity measurement
+        K[9:12, :]  = 0.0  # Gyro bias unobservable from velocity
+        K[14, :]    = 0.0  # Z accel bias is planar locked
+        K[15:18, :] = 0.0  # Gravity is frozen
+
         dx = K @ r
+        dx[0:3]   = 0.0
+        dx[3:6]   = 0.0
+        dx[9:12]  = 0.0
+        dx[14]    = 0.0
+        dx[15:18] = 0.0
 
-
-        max_rotation_correction = np.deg2rad(15.0)
-        max_position_correction = 1.0
-        max_velocity_correction = 0.3 #m/s tune to the platforms max vel
-        if (
-            not np.all(np.isfinite(dx))
-            or np.linalg.norm(dx[0:3]) > max_rotation_correction
-            or np.linalg.norm(dx[3:6]) > max_position_correction
-            or np.linalg.norm(dx[6:9]) > max_velocity_correction
-        ):
-            if DEBUG_LIDAR:
-                print(
-                    "Rejecting implausible correction: "
-                    f"rotation={np.linalg.norm(dx[0:3]):.3f} "
-                    f"position={np.linalg.norm(dx[3:6]):.3f}"
-                    f"velocity={np.linalg.norm(dx[6:9]):.3f}"
-                )
+        if not np.all(np.isfinite(dx)):
             return
-        
+
+        # Slew-rate limit on accel bias correction per ZUPT cycle (max 5 cm/s^2)
+        max_ba_step = 0.05
+        dx[12:15] = np.clip(dx[12:15], -max_ba_step, max_ba_step)
+
         if DEBUG_LIDAR:
             print(
                 "ZUPT correction candidate:",
                 f"velocity={np.linalg.norm(r):.6f}",
-                f"rot={np.linalg.norm(dx[0:3]):.6f}",
-                f"pos={np.linalg.norm(dx[3:6]):.6f}",
                 f"vel={np.linalg.norm(dx[6:9]):.6f}",
-                f"bg={np.linalg.norm(dx[9:12]):.6f}",
                 f"ba={np.linalg.norm(dx[12:15]):.6f}",
-                f"g={np.linalg.norm(dx[15:18]):.6f}",
             )
 
-        dx[0:3]   = 0.0  # Attitude is unobservable from velocity in the absence of gravity
-        dx[3:6]   = 0.0  # Position is unobservable from zero-velocity measurement
-        dx[9:12]  = 0.0  # Gyro bias is unobservable from velocity
-        dx[12:15] = 0.0  # Accel bias is unobservable; preserve calibrated bias
-        dx[15:18] = 0.0  # Gravity is frozen
-
-        theta_rot = dx[0:3]
-        state.R = state.R @ exp(theta_rot)
-        state.R = reorthonormalize(state.R)
-        state.p  += dx[3:6]
         state.p[2] = 0.0  # Planar robot constraint: ground plane height
         state.v   = np.zeros(3)  # Platform is stationary, eliminate residual velocity
-        state.bg += dx[9:12]
         state.ba += dx[12:15]
+        # Hard magnitude clamp on ba to prevent runaway
+        state.ba = np.clip(state.ba, -1.5, 1.5)
         state.g[:] = 0.0
 
-        I = np.eye(18)
-        self.P = (I - K @ H) @ self.P
+        # Joseph form covariance update
+        I_KH = np.eye(18) - K @ H
+        self.P = I_KH @ self.P @ I_KH.T + K @ R_zupt @ K.T
+        self.P = 0.5 * (self.P + self.P.T)
 
         if DEBUG_LIDAR:
             print(

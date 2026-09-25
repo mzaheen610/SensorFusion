@@ -216,6 +216,13 @@ def camera_thread(cam, state_lock, buffer_lock, filter, map, imu_state_buffer, c
             # Compute Kalman gain (K = A^-1 * H^T * R^-1) for covariance update
             K = np.linalg.solve(S_inv, weight * H.T)
 
+            # Zero out blocked dimensions on K so covariance doesn't artificially shrink:
+            K[5, :]     = 0.0  # Zero out Z translation (camera cannot observe vertical heave on planar points)
+            K[6:9, :]   = 0.0  # Zero out velocity (camera cannot observe velocity directly)
+            K[9:12, :]  = 0.0  # Zero out gyro bias
+            K[12:15, :] = 0.0  # Zero out accel bias (leave to ZUPT)
+            K[15:18, :] = 0.0  # Zero out gravity
+
             if DEBUG_CAMERA:
                 print("Camera correction candidate:")
                 print("rot:", dx[:3])
@@ -255,6 +262,7 @@ def camera_thread(cam, state_lock, buffer_lock, filter, map, imu_state_buffer, c
             state.g  += dx[15:18]
             I_KH = np.eye(P_snap.shape[0]) - K @ H
             P_new = I_KH @ P_snap @ I_KH.T + (sigma_camera**2) * (K @ K.T)
+            P_new = 0.5 * (P_new + P_new.T)
 
             with state_lock:
                 delta_p = state.p - state_old.p
