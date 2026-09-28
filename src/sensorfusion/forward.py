@@ -46,6 +46,7 @@ class ESIKFStateEstimator:
             g=np.zeros(3)
         )
         # Runtime diagnostics consumed by the LiDAR worker.
+        self.is_static = False
         self.last_lidar_update_applied = False
         self.last_lidar_residual_count = 0
         self.last_lidar_residual_norm = None
@@ -101,16 +102,23 @@ class ESIKFStateEstimator:
         delta_R = exp(delta_theta)
         self.state.R = self.state.R @ delta_R  #del_theta = w*del_t --> converted to proper SO(3) before adding to the rotation matrix(SO(3))
         self.state.R = reorthonormalize(self.state.R) # prevent det(R) runaway
-        self.state.p += (self.state.v * dt) + (0.5 * accel * dt * dt) 
-        self.state.v += accel * dt
-        self.state.p[2] = 0.0  # Planar robot constraint: 2D motion on ground/table
-        self.state.v[2] = 0.0  # Zero unobservable vertical velocity
+        if getattr(self, 'is_static', False):
+            if np.linalg.norm(ang_act) > 0.12:
+                self.is_static = False
+            else:
+                self.state.v = np.zeros(3)
 
-        # Safety speed limit for physical platform
-        MAX_SPEED = 0.8  # m/s
-        speed_xy = float(np.linalg.norm(self.state.v[:2]))
-        if speed_xy > MAX_SPEED:
-            self.state.v[:2] = (self.state.v[:2] / speed_xy) * MAX_SPEED
+        if not getattr(self, 'is_static', False):
+            self.state.p += (self.state.v * dt) + (0.5 * accel * dt * dt) 
+            self.state.v += accel * dt
+            self.state.p[2] = 0.0  # Planar robot constraint: 2D motion on ground/table
+            self.state.v[2] = 0.0  # Zero unobservable vertical velocity
+
+            # Safety speed limit for physical platform
+            MAX_SPEED = 0.8  # m/s
+            speed_xy = float(np.linalg.norm(self.state.v[:2]))
+            if speed_xy > MAX_SPEED:
+                self.state.v[:2] = (self.state.v[:2] / speed_xy) * MAX_SPEED
 
         #Covariance update
         self.P = A @ self.P @ A.T + self.compute_process_noise(dt)
@@ -299,7 +307,7 @@ class ESIKFStateEstimator:
                     # Compute a dynamic residual gate based on pose uncertainity
                     innovation_var = float(H_k @ P_copy @ H_k.T + sigma_lidar**2)
                     k = 4
-                    gate = max(0.35, k * np.sqrt(max(1e-9, innovation_var)))   # Wide enough to pull back drifted poses without rejection
+                    gate = max(0.80, k * np.sqrt(max(1e-9, innovation_var)))   # Wide enough to pull back drifted poses without rejection
                     if DEBUG_LIDAR:
                         print("Residual gate value:", gate)
                     if abs(res) > gate:

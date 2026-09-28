@@ -198,40 +198,8 @@ def lidar_thread(state_lock, buffer_lock, filter, map, imu_measurement_buffer,
                 )
             with state_lock:
                 scan_count += 1
-                if update_applied:
-                    update_count += 1
-                    # Merge the correction computed from state_old into the latest
-                    # IMU-predicted state; never replace it with a stale snapshot.
-                    delta_p = state.p - state_old.p
-                    delta_v = state.v - state_old.v
-                    delta_R = state_old.R.T @ state.R
-                    filter.state.p += delta_p
-                    filter.state.v += delta_v
-                    filter.state.R = filter.state.R @ delta_R
-                    filter.state.bg += state.bg - state_old.bg
-                    filter.state.ba += state.ba - state_old.ba
-                    filter.state.g[:] = 0.0
-                    filter.P = P_new
-                    if DEBUG_LIDAR:
-                        print(
-                            "LiDAR merge committed:",
-                            f"delta_position={delta_p}",
-                            f"delta_velocity={delta_v}",
-                            f"position={filter.state.p}",
-                            f"bg={filter.state.bg}",
-                            f"ba={filter.state.ba}",
-                            f"g={filter.state.g}",
-                            f"R_error={np.linalg.norm(filter.state.R.T @ filter.state.R - np.eye(3)):.3e}",
-                            f"det_R={np.linalg.det(filter.state.R):.12f}",
-                            flush=True,
-                        )
-                # Only add points to the map when the update was successfully applied
-                # and the robot is NOT confirmed stationary. When static, the pre-update
-                # pose may have IMU drift, so map additions would corrupt the reference map.
-                if points_world is not None and update_applied and static_count < ZUPT_CONSECUTIVE_REQUIRED:
-                    map.add_points(points_world)
 
-                # --- ZUPT check  ---
+                # --- ZUPT and motion detection check  ---
                 current_bins = scan_to_bins(scan)
                 if prev_scan_bins is not None:
                     sim = scan_similarity(current_bins, prev_scan_bins)
@@ -258,6 +226,10 @@ def lidar_thread(state_lock, buffer_lock, filter, map, imu_measurement_buffer,
                             if gyro_max > 0.12 or accel_var > 0.25:
                                 is_imu_static = False
 
+                    # If LiDAR scan difference indicates motion, platform is not static even if IMU was smooth/constant velocity
+                    if sim is not None and sim > 45.0:
+                        is_imu_static = False
+
                     print(
                         f"IMU static check: is_static={is_imu_static} "
                         f"(max_gyro={gyro_max:.4f} rad/s, accel_var={accel_var:.5f})"
@@ -268,7 +240,50 @@ def lidar_thread(state_lock, buffer_lock, filter, map, imu_measurement_buffer,
                     else:
                         static_count = 0
                 prev_scan_bins = current_bins
-                if static_count >= ZUPT_CONSECUTIVE_REQUIRED:
+
+                is_platform_static = (static_count >= ZUPT_CONSECUTIVE_REQUIRED)
+                filter.is_static = is_platform_static
+
+                if update_applied:
+                    update_count += 1
+                    # Merge the correction computed from state_old into the latest
+                    # IMU-predicted state; never replace it with a stale snapshot.
+                    delta_p = state.p - state_old.p
+                    delta_v = state.v - state_old.v
+                    delta_R = state_old.R.T @ state.R
+                    if is_platform_static:
+                        # When static, snap directly to map-corrected pose to eliminate
+                        # any open-loop IMU integration drift accumulated during scan computation.
+                        filter.state.p = state.p.copy()
+                        filter.state.v = np.zeros(3)
+                    else:
+                        filter.state.p += delta_p
+                        filter.state.v += delta_v
+                    filter.state.R = filter.state.R @ delta_R
+                    filter.state.bg += state.bg - state_old.bg
+                    filter.state.ba += state.ba - state_old.ba
+                    filter.state.g[:] = 0.0
+                    filter.P = P_new
+                    if DEBUG_LIDAR:
+                        print(
+                            "LiDAR merge committed:",
+                            f"delta_position={delta_p}",
+                            f"delta_velocity={delta_v}",
+                            f"position={filter.state.p}",
+                            f"bg={filter.state.bg}",
+                            f"ba={filter.state.ba}",
+                            f"g={filter.state.g}",
+                            f"R_error={np.linalg.norm(filter.state.R.T @ filter.state.R - np.eye(3)):.3e}",
+                            f"det_R={np.linalg.det(filter.state.R):.12f}",
+                            flush=True,
+                        )
+                # Only add points to the map when the update was successfully applied
+                # and the robot is NOT confirmed stationary. When static, the pre-update
+                # pose may have IMU drift, so map additions would corrupt the reference map.
+                if points_world is not None and update_applied and not is_platform_static:
+                    map.add_points(points_world)
+
+                if is_platform_static:
                     filter.zupt_update()
                     filter.state.v = np.zeros(3)
                     print(f"ZUPT applied | static_count={static_count}", flush=True)
