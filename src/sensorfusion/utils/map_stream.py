@@ -17,17 +17,26 @@ def tcp_stream_thread(map_ref, imu_state_buffer, buffer_lock=None, host='0.0.0.0
             while True:
                 points, colors = map_ref.get_all_points_and_colors()
 
-                # Safely extract only position coordinates (x, y, z)
+                # Safely extract position coordinates (x, y, z)
                 if buffer_lock is not None:
                     with buffer_lock:
-                        traj_pts = [item[1].p.copy() for item in imu_state_buffer]
+                        items = list(imu_state_buffer)
                 else:
                     try:
-                        traj_pts = [item[1].p.copy() for item in list(imu_state_buffer)]
+                        items = list(imu_state_buffer)
                     except Exception:
-                        traj_pts = []
+                        items = []
 
-                trajectory = np.asarray(traj_pts, dtype=np.float32) if traj_pts else np.empty((0, 3), dtype=np.float32)
+                if items and isinstance(items[0], np.ndarray) and items[0].shape == (3,):
+                    traj_pts = [p.copy() for p in items]
+                elif items and hasattr(items[0], '__len__') and len(items[0]) >= 2 and hasattr(items[0][1], 'p'):
+                    traj_pts = [item[1].p.copy() for item in items]
+                elif items and hasattr(items[0], 'p'):
+                    traj_pts = [item.p.copy() for item in items]
+                else:
+                    traj_pts = items
+
+                trajectory = np.asarray(traj_pts, dtype=np.float32) if len(traj_pts) > 0 else np.empty((0, 3), dtype=np.float32)
 
                 # Downsample if buffer is huge (> 5000 points) to keep payload small
                 if len(trajectory) > 5000:
