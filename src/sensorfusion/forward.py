@@ -388,7 +388,7 @@ class ESIKFStateEstimator:
                 dx[15:18] = 0.0
 
                 max_rotation_correction = np.deg2rad(15.0)
-                max_position_correction = 1.0
+                max_position_correction = 0.15  # 15 cm per IESIKF iteration; 1 m allowed corrupted map associations to produce runaway jumps
                 if (
                     not np.all(np.isfinite(dx))
                     or np.linalg.norm(dx[0:3]) > max_rotation_correction

@@ -226,7 +226,9 @@ def lidar_thread(state_lock, buffer_lock, filter, map, imu_measurement_buffer,
                             flush=True,
                         )
                 # Only add points to the map when the update was successfully applied
-                if points_world is not None and update_applied:
+                # and the robot is NOT confirmed stationary. When static, the pre-update
+                # pose may have IMU drift, so map additions would corrupt the reference map.
+                if points_world is not None and update_applied and static_count < ZUPT_CONSECUTIVE_REQUIRED:
                     map.add_points(points_world)
 
                 # --- ZUPT check  ---
