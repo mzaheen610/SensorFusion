@@ -1,3 +1,6 @@
+from utils.logger import setup_runtime_logger
+# Initialize runtime dual logging (console + timestamped file in logs/)
+setup_runtime_logger()
 from forward import ESIKFStateEstimator
 from initialize import IMU, CameraSensor
 import numpy as np
