@@ -74,6 +74,8 @@ def imu_thread(imu, filter_ref):
             )
         with buffer_lock:
             imu_state_buffer.append(imu_state)
+            while imu_state_buffer and now - imu_state_buffer[0][0] > 3.0:
+                imu_state_buffer.popleft()
             while imu_measurement_buffer and now - imu_measurement_buffer[0][0] > 3.0:
                 imu_measurement_buffer.popleft()
 

@@ -99,6 +99,8 @@ def lidar_thread(state_lock, buffer_lock, filter, map, imu_measurement_buffer,
     static_count = 0
     ZUPT_CONSECUTIVE_REQUIRED = 2
     ZUPT_DIST_THRESHOLD_MM = 45  # mm (85th percentile threshold)
+    last_committed_time = None
+    last_committed_pos = None
     while True:
         try:
             scan_item = scan_queue.get()
@@ -249,16 +251,47 @@ def lidar_thread(state_lock, buffer_lock, filter, map, imu_measurement_buffer,
                     # Merge the correction computed from state_old into the latest
                     # IMU-predicted state; never replace it with a stale snapshot.
                     delta_p = state.p - state_old.p
-                    delta_v = state.v - state_old.v
                     delta_R = state_old.R.T @ state.R
                     if is_platform_static:
                         # When static, snap directly to map-corrected pose to eliminate
                         # any open-loop IMU integration drift accumulated during scan computation.
-                        filter.state.p = state.p.copy()
+                        if last_committed_pos is not None and np.linalg.norm(state.p[:2] - last_committed_pos[:2]) > 0.08:
+                            filter.state.p = last_committed_pos.copy()
+                        else:
+                            filter.state.p = state.p.copy()
                         filter.state.v = np.zeros(3)
+                        delta_v = np.zeros(3)
                     else:
                         filter.state.p += delta_p
-                        filter.state.v += delta_v
+                        # Reconcile velocity from successive LiDAR-committed positions to prevent open-loop IMU runaway
+                        if last_committed_time is not None and last_committed_pos is not None:
+                            dt_scan = scan_timestamp - last_committed_time
+                            if 0.08 <= dt_scan <= 1.5:
+                                v_obs = (state.p - last_committed_pos) / dt_scan
+                                v_obs[2] = 0.0
+                                speed_obs = float(np.linalg.norm(v_obs[:2]))
+                                MAX_PLATFORM_SPEED = 0.8
+                                if speed_obs > MAX_PLATFORM_SPEED:
+                                    v_obs[:2] = (v_obs[:2] / speed_obs) * MAX_PLATFORM_SPEED
+
+                                # Pull live IMU velocity towards the LiDAR displacement velocity
+                                alpha_v = 0.7
+                                v_reconciled = (1.0 - alpha_v) * filter.state.v[:2] + alpha_v * v_obs[:2]
+                                delta_v = np.array([
+                                    v_reconciled[0] - filter.state.v[0],
+                                    v_reconciled[1] - filter.state.v[1],
+                                    0.0,
+                                ])
+                                filter.state.v[:2] = v_reconciled
+                                filter.state.v[2] = 0.0
+                            else:
+                                delta_v = np.zeros(3)
+                        else:
+                            delta_v = np.zeros(3)
+
+                    last_committed_pos = state.p.copy()
+                    last_committed_time = scan_timestamp
+
                     filter.state.R = filter.state.R @ delta_R
                     filter.state.bg += state.bg - state_old.bg
                     filter.state.ba += state.ba - state_old.ba
@@ -286,6 +319,8 @@ def lidar_thread(state_lock, buffer_lock, filter, map, imu_measurement_buffer,
                 if is_platform_static:
                     filter.zupt_update()
                     filter.state.v = np.zeros(3)
+                    last_committed_pos = filter.state.p.copy()
+                    last_committed_time = scan_timestamp
                     print(f"ZUPT applied | static_count={static_count}", flush=True)
 
             #DEBUG THE LIDAR SCAN AND EKF UPDATE RATE  

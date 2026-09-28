@@ -103,7 +103,7 @@ class ESIKFStateEstimator:
         self.state.R = self.state.R @ delta_R  #del_theta = w*del_t --> converted to proper SO(3) before adding to the rotation matrix(SO(3))
         self.state.R = reorthonormalize(self.state.R) # prevent det(R) runaway
         if getattr(self, 'is_static', False):
-            if np.linalg.norm(ang_act) > 0.12:
+            if np.linalg.norm(ang_act) > 0.12 or np.linalg.norm(accel[:2]) > 0.40:
                 self.is_static = False
             else:
                 self.state.v = np.zeros(3)
@@ -396,7 +396,7 @@ class ESIKFStateEstimator:
                 dx[15:18] = 0.0
 
                 max_rotation_correction = np.deg2rad(15.0)
-                max_position_correction = 0.80  # Plausible correction bound; 0.15 caused deadlock when deceleration drift exceeded 15 cm
+                max_position_correction = 0.08 if getattr(self, 'is_static', False) else 0.80  # Plausible correction bound; 0.08 when static prevents jumping to ghost walls
                 if (
                     not np.all(np.isfinite(dx))
                     or np.linalg.norm(dx[0:3]) > max_rotation_correction

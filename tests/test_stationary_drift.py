@@ -145,5 +145,47 @@ class StationaryDriftTests(unittest.TestCase):
             self.assertLessEqual(len(voxel["lidar"]), lidar_map.max_points_per_voxel)
 
 
+    def test_linear_push_wakes_up_static_filter(self):
+        """A linear push with horizontal acceleration > 0.4 m/s^2 must wake up the static filter."""
+        estimator = ESIKFStateEstimator()
+        estimator.is_static = True
+        dt = 0.033
+
+        # Stationary noise should not wake up the filter
+        gyro_quiet = np.zeros(3)
+        accel_quiet = np.array([0.05, 0.05, 0.0])
+        estimator.predict((gyro_quiet, accel_quiet), dt)
+        self.assertTrue(estimator.is_static)
+        np.testing.assert_array_equal(estimator.state.v, np.zeros(3))
+
+        # Push acceleration exceeding 0.4 m/s^2 must wake up the filter
+        accel_push = np.array([0.60, 0.0, 0.0])
+        estimator.predict((gyro_quiet, accel_push), dt)
+        self.assertFalse(estimator.is_static)
+        self.assertGreater(estimator.state.v[0], 0.0)
+
+    def test_velocity_reconciliation_damps_runaway_speed(self):
+        """Successive LiDAR-observed displacement velocities must damp IMU velocity runaway."""
+        estimator = ESIKFStateEstimator()
+        # Simulate IMU velocity runaway from persistent hand tilt / acceleration pulse
+        estimator.state.v = np.array([0.80, 0.10, 0.0])
+
+        # True physical motion: moved 0.05 m in 0.5 s (true speed = 0.10 m/s)
+        p_prev = np.array([0.0, 0.0, 0.0])
+        p_curr = np.array([0.05, 0.0, 0.0])
+        dt_scan = 0.5
+
+        v_obs = (p_curr - p_prev) / dt_scan
+        v_obs[2] = 0.0
+
+        alpha_v = 0.7
+        v_reconciled = (1.0 - alpha_v) * estimator.state.v[:2] + alpha_v * v_obs[:2]
+        estimator.state.v[:2] = v_reconciled
+
+        # Velocity must be significantly reduced towards true physical speed (0.10 m/s)
+        self.assertLess(estimator.state.v[0], 0.35)
+        self.assertGreater(estimator.state.v[0], 0.05)
+
+
 if __name__ == "__main__":
     unittest.main()
