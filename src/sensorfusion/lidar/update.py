@@ -253,9 +253,9 @@ def lidar_thread(state_lock, buffer_lock, filter, map, imu_measurement_buffer,
                             accels = np.array([m[2] for m in recent_imu])
                             gyro_max = float(np.max(np.linalg.norm(gyros, axis=1)))
                             accel_var = float(np.var(np.linalg.norm(accels, axis=1)))
-                            # Moving if angular speed > 0.12 rad/s (~6.9 deg/s) or accel magnitude variance > 0.08 (m/s^2)^2.
-                            # Threshold accommodates the ~0.085 rad/s motor vibration floor from the spinning RPLidar.
-                            if gyro_max > 0.12 or accel_var > 0.08:
+                            # Moving if angular speed > 0.12 rad/s (~6.9 deg/s) or accel magnitude variance > 0.25 (m/s^2)^2.
+                            # Motor vibration floor can reach ~0.15-0.20 (m/s^2)^2 depending on chassis/table resonance when stationary.
+                            if gyro_max > 0.12 or accel_var > 0.25:
                                 is_imu_static = False
 
                     print(
