@@ -19,6 +19,7 @@ state_lock = Lock()
 buffer_lock = Lock()
 imu_measurement_buffer = deque()
 imu_state_buffer = deque()
+trajectory_buffer = []  # Full historical trajectory (x,y,z) from start for visualization
 filter = ESIKFStateEstimator()
 
 def imu_thread(imu, filter_ref):
@@ -72,12 +73,21 @@ def imu_thread(imu, filter_ref):
                 copy.deepcopy(state),
                 copy.deepcopy(cov),
             )
+            curr_pos = state.p.copy()
         with buffer_lock:
             imu_state_buffer.append(imu_state)
             while imu_state_buffer and now - imu_state_buffer[0][0] > 3.0:
                 imu_state_buffer.popleft()
             while imu_measurement_buffer and now - imu_measurement_buffer[0][0] > 3.0:
                 imu_measurement_buffer.popleft()
+
+            # Retain complete historical trajectory from start for visualization
+            if not trajectory_buffer:
+                trajectory_buffer.append(curr_pos)
+            elif np.linalg.norm(curr_pos - trajectory_buffer[-1]) > 0.005:
+                trajectory_buffer.append(curr_pos)
+            else:
+                trajectory_buffer[-1] = curr_pos
 
         prediction_count += 1
         report_time = time.monotonic()
@@ -177,6 +187,9 @@ if __name__ == "__main__":
     # Clean zero-point initialization before launching workers
     filter.state.p = np.zeros(3)
     filter.state.v = np.zeros(3)
+    with buffer_lock:
+        trajectory_buffer.clear()
+        trajectory_buffer.append(np.zeros(3))
 
     """
     Starting the IMU thread - data acquisition and forward propogation
@@ -205,7 +218,7 @@ if __name__ == "__main__":
 
     stream_thread = Thread(
         target=tcp_stream_thread,
-        args=(map, imu_state_buffer, buffer_lock),
+        args=(map, trajectory_buffer, buffer_lock),
         daemon=True,
     )
     stream_thread.start()

@@ -186,6 +186,41 @@ class StationaryDriftTests(unittest.TestCase):
         self.assertLess(estimator.state.v[0], 0.35)
         self.assertGreater(estimator.state.v[0], 0.05)
 
+    def test_trajectory_buffer_retains_full_history_when_state_buffer_pruned(self):
+        """Trajectory buffer must retain full path from origin while imu_state_buffer is pruned to 3s."""
+        from collections import deque
+        imu_state_buffer = deque()
+        trajectory_buffer = [np.zeros(3)]
+
+        # Simulate 10 seconds of motion (robot moving from x=0 to x=2.0)
+        dt = 0.04  # 25 Hz
+        for step in range(250):
+            t = step * dt
+            pos = np.array([t * 0.2, 0.0, 0.0])  # Moving at 0.2 m/s
+
+            # IMU state buffer append and 3s pruning
+            imu_state_buffer.append((t, pos, np.eye(3)))
+            while imu_state_buffer and t - imu_state_buffer[0][0] > 3.0:
+                imu_state_buffer.popleft()
+
+            # Trajectory buffer maintains history
+            if not trajectory_buffer:
+                trajectory_buffer.append(pos)
+            elif np.linalg.norm(pos - trajectory_buffer[-1]) > 0.005:
+                trajectory_buffer.append(pos)
+            else:
+                trajectory_buffer[-1] = pos
+
+        # imu_state_buffer should only have ~3 seconds (~75 items)
+        self.assertLessEqual(len(imu_state_buffer), 78)
+        # Oldest time in imu_state_buffer should be ~7 seconds
+        self.assertGreater(imu_state_buffer[0][0], 6.5)
+
+        # trajectory_buffer must start at 0.0 and reach 2.0 (full trajectory preserved!)
+        self.assertAlmostEqual(trajectory_buffer[0][0], 0.0, places=3)
+        self.assertAlmostEqual(trajectory_buffer[-1][0], 2.0 - dt * 0.2, places=2)
+        self.assertGreater(len(trajectory_buffer), 100)
+
 
 if __name__ == "__main__":
     unittest.main()
