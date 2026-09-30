@@ -13,6 +13,29 @@ import cv2
 import copy
 
 DEBUG_CAMERA = False
+
+latest_debug_frame = None
+
+def get_latest_debug_frame():
+    return latest_debug_frame
+
+def _publish_debug_frame(frame_to_show):
+    global latest_debug_frame
+    if not DEBUG_CAMERA:
+        latest_debug_frame = None
+        return
+    try:
+        success, jpeg = cv2.imencode('.jpg', frame_to_show, [cv2.IMWRITE_JPEG_QUALITY, 70])
+        if success:
+            latest_debug_frame = jpeg.tobytes()
+    except Exception:
+        pass
+    try:
+        cv2.imshow("Camera View (Lidar Projected)", frame_to_show)
+        cv2.waitKey(1)
+    except Exception:
+        pass
+
 def camera_thread(cam, state_lock, buffer_lock, filter, map, imu_state_buffer, camera_scan_queue):
 
     # --- Rate Tracking Initialization ---
@@ -48,8 +71,7 @@ def camera_thread(cam, state_lock, buffer_lock, filter, map, imu_state_buffer, c
 
             if latest_scan is None or latest_scan_time is None or time.monotonic() - latest_scan_time > 0.8:
                 if DEBUG_CAMERA:
-                    cv2.imshow("Camera View (Lidar Projected)", display_frame) #show empty frame if lidar data is missing
-                    cv2.waitKey(1)
+                    _publish_debug_frame(display_frame)
                 time.sleep(0.01)
                 continue
 
@@ -61,8 +83,7 @@ def camera_thread(cam, state_lock, buffer_lock, filter, map, imu_state_buffer, c
                 )
             if state_item is None:
                 if DEBUG_CAMERA:
-                    cv2.imshow("Camera View (Lidar Projected)", display_frame)
-                    cv2.waitKey(1)
+                    _publish_debug_frame(display_frame)
                 time.sleep(0.01)
                 continue
 
@@ -186,10 +207,9 @@ def camera_thread(cam, state_lock, buffer_lock, filter, map, imu_state_buffer, c
                 #add the point residual to the total residual
                 residual_list.extend(np.asarray(residual).ravel())
 
-            #update the Live Window GUI
+            #update the Live Window GUI and stream buffer
             if DEBUG_CAMERA:
-                cv2.imshow("Camera View (Lidar Projected)", display_frame)
-                cv2.waitKey(1)
+                _publish_debug_frame(display_frame)
 
             #do the camera based update using the residual and Kalman Gain
             # with state_lock:

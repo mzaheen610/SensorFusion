@@ -7,6 +7,12 @@ import socket
 import struct
 import pickle
 
+try:
+    import cv2
+    HAS_CV2 = True
+except ImportError:
+    HAS_CV2 = False
+
 def receive_stream(robot_ip="10.141.167.214", port=5000):
     client = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     print(f"Connecting to Robot at {robot_ip}:{port}...")
@@ -67,6 +73,17 @@ def receive_stream(robot_ip="10.141.167.214", port=5000):
             map_points = payload.get("map_points", [])
             raw_colors = payload.get("colors", [])
             raw_trajectory = payload.get("trajectory", [])
+
+            # -----------------------------
+            # Camera View (if streaming)
+            # -----------------------------
+            cam_frame_bytes = payload.get("camera_frame")
+            if cam_frame_bytes is not None and HAS_CV2:
+                img_array = np.frombuffer(cam_frame_bytes, dtype=np.uint8)
+                cam_img = cv2.imdecode(img_array, cv2.IMREAD_COLOR)
+                if cam_img is not None:
+                    cv2.imshow("Camera View (Lidar Projected)", cam_img)
+                    cv2.waitKey(1)
 
             # Safe trajectory extraction (handles numpy array, deque, or tuples)
             if isinstance(raw_trajectory, np.ndarray) and raw_trajectory.ndim == 2:
@@ -135,6 +152,11 @@ def receive_stream(robot_ip="10.141.167.214", port=5000):
         print(f"\nStream error: {e}")
     finally:
         visualizer.destroy_window()
+        if HAS_CV2:
+            try:
+                cv2.destroyAllWindows()
+            except Exception:
+                pass
         client.close()
 
 if __name__ == "__main__":

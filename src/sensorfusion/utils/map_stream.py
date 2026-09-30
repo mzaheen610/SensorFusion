@@ -4,6 +4,14 @@ import pickle
 import time
 import numpy as np
 
+try:
+    from camera.photometry import get_latest_debug_frame
+except ImportError:
+    try:
+        from sensorfusion.camera.photometry import get_latest_debug_frame
+    except ImportError:
+        get_latest_debug_frame = lambda: None
+
 def tcp_stream_thread(map_ref, imu_state_buffer, buffer_lock=None, host='0.0.0.0', port=5000):
     server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
@@ -48,6 +56,10 @@ def tcp_stream_thread(map_ref, imu_state_buffer, buffer_lock=None, host='0.0.0.0
                     "colors": colors.astype(np.uint8),  # 0-255, keeps payload small
                     "trajectory": trajectory
                 }
+
+                cam_frame = get_latest_debug_frame()
+                if cam_frame is not None:
+                    payload["camera_frame"] = cam_frame
 
                 data = pickle.dumps(
                     payload,
