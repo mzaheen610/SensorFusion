@@ -19,11 +19,10 @@ def scan_to_bins(scan):
         bins[idx] = dist  # last point in bin wins; fine for this coarse check
     return bins
 
-def scan_similarity(bins_a, bins_b, percentile=85):
+def scan_similarity(bins_a, bins_b, percentile=50):
     """
-    Find similarity between bins of two scans using a high percentile (default 85th)
-    so that localized motion (e.g. a walking person or small platform translation)
-    is not hidden by static background walls.
+    Find similarity between bins of two scans using median (default 50th percentile)
+    to reject beam edge jitter while remaining sensitive to whole-scan motion.
     """
     valid = ~np.isnan(bins_a) & ~np.isnan(bins_b)
     if valid.sum() < MIN_VALID_BINS:

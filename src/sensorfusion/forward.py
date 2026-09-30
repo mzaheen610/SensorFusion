@@ -387,7 +387,9 @@ class ESIKFStateEstimator:
                 if np.linalg.norm(dx) < eps:
                     break
 
-                # Planar 2D robot constraints on state correction
+                # Planar 2D robot constraints on state and covariance correction
+                kalman_gain[0:2, :] = 0.0  # 2D planar LiDAR cannot observe roll/pitch
+                kalman_gain[5, :]   = 0.0  # 2D planar LiDAR cannot observe Z translation
                 dx[0:2]   = 0.0  # 2D planar LiDAR cannot observe roll/pitch
                 dx[5]     = 0.0  # 2D planar LiDAR cannot observe Z translation
                 dx[6:9]   = 0.0  # Velocity is unobservable from position-only LiDAR update

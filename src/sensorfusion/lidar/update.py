@@ -101,6 +101,7 @@ def lidar_thread(state_lock, buffer_lock, filter, map, imu_measurement_buffer,
     ZUPT_DIST_THRESHOLD_MM = 45  # mm (85th percentile threshold)
     last_committed_time = None
     last_committed_pos = None
+    last_map_pos = None
     while True:
         try:
             scan_item = scan_queue.get()
@@ -228,8 +229,8 @@ def lidar_thread(state_lock, buffer_lock, filter, map, imu_measurement_buffer,
                             if gyro_max > 0.12 or accel_var > 0.25:
                                 is_imu_static = False
 
-                    # If LiDAR scan difference indicates motion, platform is not static even if IMU was smooth/constant velocity
-                    if sim is not None and sim > 45.0:
+                    # Only flag non-static if LiDAR motion is sustained, or if IMU variance is not negligible
+                    if sim is not None and sim > 60.0 and (gyro_max > 0.08 or accel_var > 0.10):
                         is_imu_static = False
 
                     print(
@@ -267,8 +268,12 @@ def lidar_thread(state_lock, buffer_lock, filter, map, imu_measurement_buffer,
                         if last_committed_time is not None and last_committed_pos is not None:
                             dt_scan = scan_timestamp - last_committed_time
                             if 0.08 <= dt_scan <= 1.5:
-                                v_obs = (state.p - last_committed_pos) / dt_scan
-                                v_obs[2] = 0.0
+                                disp = np.linalg.norm(state.p[:2] - last_committed_pos[:2])
+                                if disp < 0.04:  # Under 4cm displacement over scan interval is noise, not real velocity
+                                    v_obs = np.zeros(3)
+                                else:
+                                    v_obs = (state.p - last_committed_pos) / dt_scan
+                                    v_obs[2] = 0.0
                                 speed_obs = float(np.linalg.norm(v_obs[:2]))
                                 MAX_PLATFORM_SPEED = 0.8
                                 if speed_obs > MAX_PLATFORM_SPEED:
@@ -310,11 +315,11 @@ def lidar_thread(state_lock, buffer_lock, filter, map, imu_measurement_buffer,
                             f"det_R={np.linalg.det(filter.state.R):.12f}",
                             flush=True,
                         )
-                # Only add points to the map when the update was successfully applied
-                # and the robot is NOT confirmed stationary. When static, the pre-update
-                # pose may have IMU drift, so map additions would corrupt the reference map.
+                # Only add points if the robot has moved at least 0.10m from the last map commit
                 if points_world is not None and update_applied and not is_platform_static:
-                    map.add_points(points_world)
+                    if last_map_pos is None or np.linalg.norm(filter.state.p[:2] - last_map_pos[:2]) > 0.10:
+                        map.add_points(points_world)
+                        last_map_pos = filter.state.p.copy()
 
                 if is_platform_static:
                     filter.zupt_update()

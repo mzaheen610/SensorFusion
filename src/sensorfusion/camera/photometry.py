@@ -247,6 +247,7 @@ def camera_thread(cam, state_lock, buffer_lock, filter, map, imu_state_buffer, c
                 continue
             
             if getattr(filter, 'is_static', False):
+                dx[0:3]   = 0.0  # Lock rotation when platform is confirmed static
                 dx[3:6]   = 0.0  # Lock translation when platform is confirmed static
             else:
                 dx[5]     = 0.0  # Zero out Z translation (camera cannot observe vertical heave on planar points)
