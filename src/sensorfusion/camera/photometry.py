@@ -11,6 +11,7 @@ from utils.projections import (
 from utils.so3_rotation import skew, exp, reorthonormalize
 import cv2
 import copy
+import os
 
 DEBUG_CAMERA = False
 
@@ -30,11 +31,17 @@ def _publish_debug_frame(frame_to_show):
             latest_debug_frame = jpeg.tobytes()
     except Exception:
         pass
-    try:
-        cv2.imshow("Camera View (Lidar Projected)", frame_to_show)
-        cv2.waitKey(1)
-    except Exception:
-        pass
+
+    # Only attempt local window on the Pi if explicitly requested and display server is available
+    # to prevent headless Qt QPA/xcb SIGABRT crashes when running via Remote Shell.
+    if os.environ.get("SENSORFUSION_LOCAL_GUI") == "1" and (
+        os.environ.get("DISPLAY") or os.environ.get("WAYLAND_DISPLAY")
+    ):
+        try:
+            cv2.imshow("Camera View (Lidar Projected)", frame_to_show)
+            cv2.waitKey(1)
+        except Exception:
+            pass
 
 def camera_thread(cam, state_lock, buffer_lock, filter, map, imu_state_buffer, camera_scan_queue):
 
