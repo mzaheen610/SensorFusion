@@ -180,11 +180,11 @@ def lidar_thread(state_lock, buffer_lock, filter, map, imu_measurement_buffer,
 
             if camera_scan_queue is not None:
                 try:
-                    camera_scan_queue.put_nowait((scan_timestamp, scan))
+                    camera_scan_queue.put_nowait((scan_timestamp, scan, state.p.copy(), state.R.copy()))
                 except Full:
                     try:
                         camera_scan_queue.get_nowait()
-                        camera_scan_queue.put_nowait((scan_timestamp, scan))
+                        camera_scan_queue.put_nowait((scan_timestamp, scan, state.p.copy(), state.R.copy()))
                     except (Empty, Full):
                         pass
 
@@ -229,8 +229,11 @@ def lidar_thread(state_lock, buffer_lock, filter, map, imu_measurement_buffer,
                             if gyro_max > 0.12 or accel_var > 0.25:
                                 is_imu_static = False
 
-                    # Only flag non-static if LiDAR motion is sustained, or if IMU variance is not negligible
-                    if sim is not None and sim > 60.0 and (gyro_max > 0.08 or accel_var > 0.10):
+                    # Allow significant structural LiDAR shift (> 70mm) to independently indicate movement,
+                    # preventing smooth constant-velocity translations from being falsely flagged as static.
+                    if sim is not None and sim > 70.0:
+                        is_imu_static = False
+                    elif sim is not None and sim > 40.0 and (gyro_max > 0.06 or accel_var > 0.08):
                         is_imu_static = False
 
                     print(
@@ -269,13 +272,13 @@ def lidar_thread(state_lock, buffer_lock, filter, map, imu_measurement_buffer,
                             dt_scan = scan_timestamp - last_committed_time
                             if 0.08 <= dt_scan <= 1.5:
                                 disp = np.linalg.norm(state.p[:2] - last_committed_pos[:2])
-                                if disp < 0.04:  # Under 4cm displacement over scan interval is noise, not real velocity
+                                if disp < 0.01:  # Under 1cm displacement over scan interval (0.1 m/s at 10Hz) is resting noise
                                     v_obs = np.zeros(3)
                                 else:
                                     v_obs = (state.p - last_committed_pos) / dt_scan
                                     v_obs[2] = 0.0
                                 speed_obs = float(np.linalg.norm(v_obs[:2]))
-                                MAX_PLATFORM_SPEED = 0.8
+                                MAX_PLATFORM_SPEED = 2.5
                                 if speed_obs > MAX_PLATFORM_SPEED:
                                     v_obs[:2] = (v_obs[:2] / speed_obs) * MAX_PLATFORM_SPEED
 

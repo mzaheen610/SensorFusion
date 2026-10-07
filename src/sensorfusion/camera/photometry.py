@@ -69,10 +69,15 @@ def camera_thread(cam, state_lock, buffer_lock, filter, map, imu_state_buffer, c
                 frame = cv2.undistort(frame, K_cam, dist_coeffs)
 
             display_frame = frame.copy()
-            #Get the latest compensated lidar scan from the camera queue
+            # Get the latest compensated lidar scan and post-LiDAR pose from the queue
+            p_lidar, R_lidar = None, None
             try:
                 while True:
-                    latest_scan_time, latest_scan = camera_scan_queue.get_nowait() 
+                    queue_item = camera_scan_queue.get_nowait()
+                    if len(queue_item) == 4:
+                        latest_scan_time, latest_scan, p_lidar, R_lidar = queue_item
+                    else:
+                        latest_scan_time, latest_scan = queue_item
             except Empty:
                 pass
 
@@ -82,7 +87,7 @@ def camera_thread(cam, state_lock, buffer_lock, filter, map, imu_state_buffer, c
                 time.sleep(0.01)
                 continue
 
-            #Get the latest state near the camera scan timing
+            # Get the latest state near the camera scan timing
             with buffer_lock:
                 state_item = next(
                     (item for item in reversed(imu_state_buffer) if item[0] <= frame_timestamp),
@@ -94,32 +99,37 @@ def camera_thread(cam, state_lock, buffer_lock, filter, map, imu_state_buffer, c
                 time.sleep(0.01)
                 continue
 
-            #convert the RGB image to grayscale
+            # convert the RGB image to grayscale
             gray = cv2.cvtColor(frame, cv2.COLOR_RGB2GRAY)
             Ix = cv2.Sobel(gray, cv2.CV_32F, 1, 0, ksize=3)
             Iy = cv2.Sobel(gray, cv2.CV_32F, 0, 1, ksize=3)
 
-            #project lidar points to the current camera frame (u,v)
+            # project lidar points to the current camera frame (u,v)
             R_CI = np.array([
                 [ 0.0, -1.0,  0.0],  # Camera X (Right) = IMU -Y (Left)
                 [ 0.0,  0.0, -1.0],  # Camera Y (Down)  = IMU -Z (Up)
                 [ 1.0,  0.0,  0.0]   # Camera Z (Front) = IMU +X (Forward)
             ])
             # R_CI = np.eye(3) 
-            T_CI = np.eye(4) #dummy camera imu extrinsics, real values have to be calibrated later
+            T_CI = np.eye(4) # dummy camera imu extrinsics, real values have to be calibrated later
             T_CI[:3, :3] = R_CI
             T_CI[:3, 3] = np.zeros(3)
 
-            state_time, state_snapshot, P_snap = state_item #state item contains timestamp, state, cov
+            state_time, state_snapshot, P_snap = state_item # state item contains timestamp, state, cov
             state_old = copy.deepcopy(state_snapshot)
             state = copy.deepcopy(state_snapshot)
 
+            # Use post-LiDAR corrected pose as the linearization point if available (Sequential Update)
             T_GI = np.eye(4)
-            T_GI[:3, :3] = state_snapshot.R
-            T_GI[:3, 3] = state_snapshot.p
+            if p_lidar is not None and R_lidar is not None:
+                T_GI[:3, :3] = R_lidar
+                T_GI[:3, 3] = p_lidar
+            else:
+                T_GI[:3, :3] = state_snapshot.R
+                T_GI[:3, 3] = state_snapshot.p
 
-            #find visual map points for the current image frame based on current pose and current lidar scan
-            visual_map_points = map.query_visible_voxels(latest_scan, filter.state) #visible voxel query
+            # find visual map points for the current image frame based on current pose and current lidar scan
+            visual_map_points = map.query_visible_voxels(latest_scan, filter.state) # visible voxel query
 
             projected_points_pixels = project_points_to_frame(
                 visual_map_points, T_CI, T_GI

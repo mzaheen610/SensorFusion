@@ -55,11 +55,15 @@ class Map:
                         "color": []
                     }
                 voxel = self.voxel_map[key]
-                #cap the points in a voxel to bound the map size
-                if len(voxel["lidar"]) < self.max_points_per_voxel:   
-                    voxel["lidar"].append(point)
-                    voxel["color"].append(np.array([128.0, 128.0, 128.0]))  # placeholder gray
-                    voxel["image"].append(None)  #store image patch per point
+                # Sliding FIFO window: when voxel reaches max capacity, evict oldest point
+                # to allow fresh observations to overwrite stale drift/ghost points.
+                if len(voxel["lidar"]) >= self.max_points_per_voxel:
+                    voxel["lidar"].pop(0)
+                    voxel["color"].pop(0)
+                    voxel["image"].pop(0)
+                voxel["lidar"].append(point)
+                voxel["color"].append(np.array([128.0, 128.0, 128.0]))  # placeholder gray
+                voxel["image"].append(None)  # store image patch per point
 
     def query(self, point, min_points_in_voxel=10, radius_voxels=1):
         # Find neighbors from the current voxel first.
@@ -89,7 +93,22 @@ class Map:
                         if nvoxel is not None and nvoxel["lidar"]:
                             neighbors.extend(nvoxel["lidar"])
                             if len(neighbors) >= min_points_in_voxel * 2:
-                                break  #stop early once we have enough points
+                                break  # stop early once we have enough points
+
+            # Adaptive fallback: If initial search radius yielded too few points to fit geometry (<3),
+            # dynamically expand search radius by 1 voxel (up to 2 voxels = 1.0m) to catch larger displacements.
+            if len(neighbors) < 3 and radius_voxels < 2:
+                for dx in range(-2, 3):
+                    for dy in range(-2, 3):
+                        for dz in range(-2, 3):
+                            if max(abs(dx), abs(dy), abs(dz)) <= radius_voxels:
+                                continue  # already visited
+                            nkey = (key[0] + dx, key[1] + dy, key[2] + dz)
+                            nvoxel = self.voxel_map.get(nkey, None)
+                            if nvoxel is not None and nvoxel["lidar"]:
+                                neighbors.extend(nvoxel["lidar"])
+                                if len(neighbors) >= min_points_in_voxel * 2:
+                                    break
 
         if len(neighbors) == 0:
             return None

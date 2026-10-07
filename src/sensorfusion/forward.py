@@ -114,8 +114,8 @@ class ESIKFStateEstimator:
             self.state.p[2] = 0.0  # Planar robot constraint: 2D motion on ground/table
             self.state.v[2] = 0.0  # Zero unobservable vertical velocity
 
-            # Safety speed limit for physical platform
-            MAX_SPEED = 0.8  # m/s
+            # Safety speed limit for physical platform (expanded to 2.5 m/s to allow rapid dynamics)
+            MAX_SPEED = 2.5  # m/s
             speed_xy = float(np.linalg.norm(self.state.v[:2]))
             if speed_xy > MAX_SPEED:
                 self.state.v[:2] = (self.state.v[:2] / speed_xy) * MAX_SPEED
@@ -307,7 +307,7 @@ class ESIKFStateEstimator:
                     # Compute a dynamic residual gate based on pose uncertainity
                     innovation_var = float(H_k @ P_copy @ H_k.T + sigma_lidar**2)
                     k = 4
-                    gate = max(0.80, k * np.sqrt(max(1e-9, innovation_var)))   # Wide enough to pull back drifted poses without rejection
+                    gate = max(1.20, k * np.sqrt(max(1e-9, innovation_var)))   # Wide enough to pull back drifted poses without rejection
                     if DEBUG_LIDAR:
                         print("Residual gate value:", gate)
                     if abs(res) > gate:
@@ -397,8 +397,8 @@ class ESIKFStateEstimator:
                 dx[12:15] = 0.0
                 dx[15:18] = 0.0
 
-                max_rotation_correction = np.deg2rad(15.0)
-                max_position_correction = 0.08 if getattr(self, 'is_static', False) else 0.80  # Plausible correction bound; 0.08 when static prevents jumping to ghost walls
+                max_rotation_correction = np.deg2rad(45.0)  # Expanded from 15 deg to allow recovery from rapid turns
+                max_position_correction = 0.08 if getattr(self, 'is_static', False) else 1.50  # Expanded from 0.80m for dynamic recovery
                 if (
                     not np.all(np.isfinite(dx))
                     or np.linalg.norm(dx[0:3]) > max_rotation_correction
