@@ -84,10 +84,8 @@ def imu_thread(imu, filter_ref):
             while imu_measurement_buffer and now - imu_measurement_buffer[0][0] > 3.0:
                 imu_measurement_buffer.popleft()
 
-            # Retain complete historical trajectory from start for visualization
+            # Live head tracking for visualization: update the active tip of the trajectory in real-time
             if not trajectory_buffer:
-                trajectory_buffer.append(curr_pos)
-            elif np.linalg.norm(curr_pos - trajectory_buffer[-1]) > 0.005:
                 trajectory_buffer.append(curr_pos)
             else:
                 trajectory_buffer[-1] = curr_pos
@@ -206,7 +204,8 @@ if __name__ == "__main__":
     lidar_worker = Thread(
         target=lidar_thread,
         args=(state_lock, buffer_lock, filter, map, imu_measurement_buffer,
-              imu_state_buffer, lidar_prev_scan_time, lidar_scan_queue, camera_scan_queue),
+              imu_state_buffer, lidar_prev_scan_time, lidar_scan_queue, camera_scan_queue,
+              trajectory_buffer),
         daemon=True,
     )
     lidar_worker.start()

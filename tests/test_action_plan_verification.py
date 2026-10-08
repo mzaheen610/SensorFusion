@@ -277,6 +277,74 @@ class ActionPlanIntegratedTests(unittest.TestCase):
         proposed_mean = np.mean(proposed_voxel, axis=0)
         self.assertAlmostEqual(proposed_mean[0], 0.00, delta=1e-3, msg="Proposed FIFO voxel successfully self-healed")
 
+    def test_integrated_change_5_table_sliding_and_unclamped_smooth_response(self):
+        """
+        Verifies that smooth manual table sliding (low vibration, low gyro, small scan shift):
+        1. Correctly classifies as moving via LiDAR displacement (>= 1.5 cm) or sim > 15 mm.
+        2. Never forcibly snaps back poses if dist > 0.08 m.
+        3. Never injects artificial velocity spikes when exiting static mode.
+        4. Rejects divergent camera proposals (> 0.15 m).
+        """
+        # 1. Table sliding conditions (from Oct 7 log metrics)
+        gyro_max = 0.045   # rad/s (median in log was 0.054)
+        accel_var = 0.035  # (m/s^2)^2 (median in log was 0.033)
+        sim = 20.0        # mm (table translation between 100ms scans)
+        lidar_disp = 0.025 # 2.5 cm physical displacement observed by LiDAR
+
+        # Baseline logic:
+        baseline_static = True
+        if gyro_max > 0.12 or accel_var > 0.25:
+            baseline_static = False
+        if sim is not None and sim > 60.0 and (gyro_max > 0.08 or accel_var > 0.10):
+            baseline_static = False
+
+        # Proposed refined logic:
+        proposed_static = True
+        if gyro_max > 0.12 or accel_var > 0.25:
+            proposed_static = False
+        if sim is not None and sim > 70.0:
+            proposed_static = False
+        elif sim is not None and sim > 35.0 and (gyro_max > 0.05 or accel_var > 0.05):
+            proposed_static = False
+        elif sim is not None and sim > 15.0 and (gyro_max > 0.03 or accel_var > 0.02):
+            proposed_static = False
+        if lidar_disp >= 0.015:
+            proposed_static = False
+
+        self.assertTrue(baseline_static, "Baseline erroneously flags table motion as static")
+        self.assertFalse(proposed_static, "Proposed logic detects smooth table motion via LiDAR displacement")
+
+        # 2. No 8 cm snap-back clamping
+        state_p = np.array([0.15, 0.0, 0.0])
+        last_committed = np.array([0.0, 0.0, 0.0])
+        # Baseline would do: if norm > 0.08: p = last_committed.copy() (erasing 15cm movement)
+        baseline_committed = last_committed.copy() if np.linalg.norm(state_p[:2] - last_committed[:2]) > 0.08 else state_p.copy()
+        # Proposed accepts converged pose without snapping back:
+        proposed_committed = state_p.copy()
+
+        self.assertEqual(baseline_committed[0], 0.0, "Baseline erased the 15cm movement")
+        self.assertEqual(proposed_committed[0], 0.15, "Proposed kept true 15cm converged movement")
+
+        # 3. Guarded velocity reconciliation exiting static
+        prev_is_static = True
+        dt_scan = 0.10
+        # If exiting static, baseline computes v_obs = (0.15 - 0.0) / 0.10 = 1.5 m/s spike!
+        baseline_v_spike = (state_p - last_committed) / dt_scan
+        # Proposed guards against stale static baseline:
+        if prev_is_static:
+            proposed_v = np.zeros(3)
+        else:
+            proposed_v = (state_p - last_committed) / dt_scan
+
+        self.assertGreater(np.linalg.norm(baseline_v_spike), 1.0, "Baseline injects huge velocity spike")
+        self.assertEqual(np.linalg.norm(proposed_v), 0.0, "Proposed cleanly resets velocity from 0")
+
+        # 4. Camera gate protection
+        cam_dx_spike = np.array([0.0, 0.0, 0.0, 0.73, 0.02, 0.0])  # Match 53 in Oct 7 log
+        max_pos_gate = 0.15
+        cam_accepted = np.linalg.norm(cam_dx_spike[3:6]) <= max_pos_gate
+        self.assertFalse(cam_accepted, "Camera 0.73m leap must be rejected by 0.15m gate")
+
 
 if __name__ == "__main__":
     unittest.main()

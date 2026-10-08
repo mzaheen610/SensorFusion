@@ -265,9 +265,9 @@ def camera_thread(cam, state_lock, buffer_lock, filter, map, imu_state_buffer, c
                 print("rot:", dx[:3])
                 print("pos:", dx[3:6])
 
-            max_rotation_correction = np.deg2rad(15.0)
-            max_position_correction = 1.0 #1 meter
-            max_velocity_correction = 0.3 #m/s tune to the platforms max vel
+            max_rotation_correction = np.deg2rad(5.0)  # 5 deg max camera correction
+            max_position_correction = 0.15  # 15 cm max camera correction prevents divergent leaps
+            max_velocity_correction = 0.20  # m/s max velocity correction
             if (
                 not np.all(np.isfinite(dx))
                 or np.linalg.norm(dx[0:3]) > max_rotation_correction

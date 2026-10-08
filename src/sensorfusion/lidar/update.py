@@ -85,7 +85,8 @@ def lidar_acquisition_process(port, scan_queue, camera_scan_queue=None):
 
 
 def lidar_thread(state_lock, buffer_lock, filter, map, imu_measurement_buffer,
-                 imu_state_buffer, lidar_prev_scan_time, scan_queue, camera_scan_queue=None):
+                 imu_state_buffer, lidar_prev_scan_time, scan_queue, camera_scan_queue=None,
+                 trajectory_buffer=None):
     """
     Backward propogation
     """
@@ -102,6 +103,7 @@ def lidar_thread(state_lock, buffer_lock, filter, map, imu_measurement_buffer,
     last_committed_time = None
     last_committed_pos = None
     last_map_pos = None
+    prev_is_platform_static = False
     while True:
         try:
             scan_item = scan_queue.get()
@@ -229,12 +231,20 @@ def lidar_thread(state_lock, buffer_lock, filter, map, imu_measurement_buffer,
                             if gyro_max > 0.12 or accel_var > 0.25:
                                 is_imu_static = False
 
-                    # Allow significant structural LiDAR shift (> 70mm) to independently indicate movement,
-                    # preventing smooth constant-velocity translations from being falsely flagged as static.
+                    # 1. Structural scan similarity override
                     if sim is not None and sim > 70.0:
                         is_imu_static = False
-                    elif sim is not None and sim > 40.0 and (gyro_max > 0.06 or accel_var > 0.08):
+                    elif sim is not None and sim > 35.0 and (gyro_max > 0.05 or accel_var > 0.05):
                         is_imu_static = False
+                    elif sim is not None and sim > 15.0 and (gyro_max > 0.03 or accel_var > 0.02):
+                        is_imu_static = False
+
+                    # 2. LiDAR ICP displacement check: If the converged LiDAR update moved from the last committed pose,
+                    # the platform is physically translating, even if hand motion is smooth (low accel/gyro).
+                    if update_applied and last_committed_pos is not None:
+                        lidar_disp = float(np.linalg.norm(state.p[:2] - last_committed_pos[:2]))
+                        if lidar_disp >= 0.015:  # >= 1.5 cm displacement over scan interval indicates physical movement
+                            is_imu_static = False
 
                     print(
                         f"IMU static check: is_static={is_imu_static} "
@@ -257,12 +267,9 @@ def lidar_thread(state_lock, buffer_lock, filter, map, imu_measurement_buffer,
                     delta_p = state.p - state_old.p
                     delta_R = state_old.R.T @ state.R
                     if is_platform_static:
-                        # When static, snap directly to map-corrected pose to eliminate
-                        # any open-loop IMU integration drift accumulated during scan computation.
-                        if last_committed_pos is not None and np.linalg.norm(state.p[:2] - last_committed_pos[:2]) > 0.08:
-                            filter.state.p = last_committed_pos.copy()
-                        else:
-                            filter.state.p = state.p.copy()
+                        # When static, lock directly to the map-corrected pose;
+                        # never forcefully snap back to last_committed_pos (which erases real motion).
+                        filter.state.p = state.p.copy()
                         filter.state.v = np.zeros(3)
                         delta_v = np.zeros(3)
                     else:
@@ -270,20 +277,21 @@ def lidar_thread(state_lock, buffer_lock, filter, map, imu_measurement_buffer,
                         # Reconcile velocity from successive LiDAR-committed positions to prevent open-loop IMU runaway
                         if last_committed_time is not None and last_committed_pos is not None:
                             dt_scan = scan_timestamp - last_committed_time
-                            if 0.08 <= dt_scan <= 1.5:
-                                disp = np.linalg.norm(state.p[:2] - last_committed_pos[:2])
-                                if disp < 0.01:  # Under 1cm displacement over scan interval (0.1 m/s at 10Hz) is resting noise
+                            # Guard against stale baseline: only compute velocity if continuous moving scans (dt <= 0.6s and not just exiting static)
+                            if 0.08 <= dt_scan <= 0.60 and not prev_is_platform_static:
+                                disp = float(np.linalg.norm(state.p[:2] - last_committed_pos[:2]))
+                                if disp < 0.015:  # Under 1.5cm displacement over scan interval is resting noise
                                     v_obs = np.zeros(3)
                                 else:
                                     v_obs = (state.p - last_committed_pos) / dt_scan
                                     v_obs[2] = 0.0
                                 speed_obs = float(np.linalg.norm(v_obs[:2]))
-                                MAX_PLATFORM_SPEED = 2.5
+                                MAX_PLATFORM_SPEED = 1.5  # Realistic ceiling for table/hand/robot translation
                                 if speed_obs > MAX_PLATFORM_SPEED:
                                     v_obs[:2] = (v_obs[:2] / speed_obs) * MAX_PLATFORM_SPEED
 
-                                # Pull live IMU velocity towards the LiDAR displacement velocity
-                                alpha_v = 0.7
+                                # Pull live IMU velocity towards displacement velocity smoothly (alpha_v = 0.4 avoids spikes)
+                                alpha_v = 0.4
                                 v_reconciled = (1.0 - alpha_v) * filter.state.v[:2] + alpha_v * v_obs[:2]
                                 delta_v = np.array([
                                     v_reconciled[0] - filter.state.v[0],
@@ -293,12 +301,23 @@ def lidar_thread(state_lock, buffer_lock, filter, map, imu_measurement_buffer,
                                 filter.state.v[:2] = v_reconciled
                                 filter.state.v[2] = 0.0
                             else:
+                                # When transitioning from static to moving, start velocity cleanly from zero
+                                filter.state.v = np.zeros(3)
                                 delta_v = np.zeros(3)
                         else:
                             delta_v = np.zeros(3)
 
                     last_committed_pos = state.p.copy()
                     last_committed_time = scan_timestamp
+                    prev_is_platform_static = is_platform_static
+
+                    # Append validated, converged LiDAR pose to trajectory_buffer for clean visualization
+                    if trajectory_buffer is not None and not is_platform_static:
+                        with buffer_lock:
+                            if not trajectory_buffer:
+                                trajectory_buffer.append(filter.state.p.copy())
+                            elif np.linalg.norm(filter.state.p[:2] - trajectory_buffer[-1][:2]) >= 0.02:
+                                trajectory_buffer.append(filter.state.p.copy())
 
                     filter.state.R = filter.state.R @ delta_R
                     filter.state.bg += state.bg - state_old.bg
