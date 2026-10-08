@@ -103,6 +103,7 @@ def lidar_thread(state_lock, buffer_lock, filter, map, imu_measurement_buffer,
     last_committed_time = None
     last_committed_pos = None
     last_map_pos = None
+    last_map_R = None
     prev_is_platform_static = False
     while True:
         try:
@@ -231,25 +232,26 @@ def lidar_thread(state_lock, buffer_lock, filter, map, imu_measurement_buffer,
                             if gyro_max > 0.12 or accel_var > 0.25:
                                 is_imu_static = False
 
-                    # Robust stationary detection accounting for RPLidar motor vibration:
+                    # Robust stationary detection accounting for RPLidar motor vibration vs active platform motion:
                     # Motor vibration floor on stationary chassis:
                     #   Raw optical scan similarity: sim <= 8.5 mm (100% of stationary scans)
                     #   IMU gyro vibration: gyro_max <= 0.085 rad/s (motor spin harmonics)
                     #   IMU accel vibration: accel_var <= 0.06 (m/s^2)^2 (motor vibration floor)
                     #
-                    # Physical translation shifts optical range bins beyond 10-12 mm.
-                    if sim is not None and sim <= 10.0:
+                    # Physical rotation or gross acceleration MUST take strict precedence over optical scan similarity,
+                    # because body-centric range bins in symmetric corridors or slow pivot turns can easily yield sim <= 10.0 mm.
+                    if gyro_max > 0.10 or accel_var > 0.20:
+                        # Gross physical rotation or acceleration well above the 0.08 rad/s motor floor
+                        is_imu_static = False
+                    elif sim is not None and sim <= 10.0:
                         # Optical beam proof: Chassis is resting on the ground!
                         # Overrules motor vibration shaking the IMU.
                         is_imu_static = True
                     elif sim is not None and sim > 12.0:
                         # Real physical translation shifts range bins beyond the 8.5mm vibration floor
                         is_imu_static = False
-                    elif gyro_max > 0.12 or accel_var > 0.15:
-                        # Gross physical rotation or acceleration well above the 0.08 rad/s motor floor
-                        is_imu_static = False
                     else:
-                        is_imu_static = True
+                        is_imu_static = (gyro_max <= 0.085 and accel_var <= 0.06)
 
                     print(
                         f"IMU static check: is_static={is_imu_static} "
@@ -342,11 +344,23 @@ def lidar_thread(state_lock, buffer_lock, filter, map, imu_measurement_buffer,
                             f"det_R={np.linalg.det(filter.state.R):.12f}",
                             flush=True,
                         )
-                # Only add points if the robot has moved at least 0.10m from the last map commit
+                # Add points to map if the robot translated > 0.08m OR rotated > 6.0 deg
                 if points_world is not None and update_applied and not is_platform_static:
-                    if last_map_pos is None or np.linalg.norm(filter.state.p[:2] - last_map_pos[:2]) > 0.10:
+                    should_commit_map = False
+                    if last_map_pos is None or last_map_R is None:
+                        should_commit_map = True
+                    else:
+                        disp_trans = float(np.linalg.norm(filter.state.p[:2] - last_map_pos[:2]))
+                        R_diff = last_map_R.T @ filter.state.R
+                        cos_theta = np.clip(0.5 * (np.trace(R_diff) - 1.0), -1.0, 1.0)
+                        rot_angle_deg = np.rad2deg(np.arccos(cos_theta))
+                        if disp_trans > 0.08 or rot_angle_deg > 6.0:
+                            should_commit_map = True
+
+                    if should_commit_map:
                         map.add_points(points_world)
                         last_map_pos = filter.state.p.copy()
+                        last_map_R = filter.state.R.copy()
 
                 if is_platform_static:
                     filter.zupt_update()

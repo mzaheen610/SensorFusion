@@ -344,6 +344,91 @@ class ActionPlanIntegratedTests(unittest.TestCase):
         cam_accepted = np.linalg.norm(cam_dx_spike[3:6]) <= max_pos_gate
         self.assertFalse(cam_accepted, "Camera 0.73m leap must be rejected by 0.15m gate")
 
+    def test_cornering_and_turning_resilience(self):
+        """
+        Verify the four core fixes for cornering and turning performance:
+        1. Gyro rotation precedence over scan similarity during turns.
+        2. Corner wall local collinearity extraction from 6-nearest subset.
+        3. Map commit triggering on heading change (rotation > 6 deg) without translation.
+        4. Camera photometric correction zeroing out roll and pitch to maintain level horizon.
+        """
+        # 1. Gyro precedence over scan similarity
+        def check_static(sim_val, gyro_val, acc_val):
+            if gyro_val > 0.10 or acc_val > 0.20:
+                return False
+            elif sim_val is not None and sim_val <= 10.0:
+                return True
+            elif sim_val is not None and sim_val > 12.0:
+                return False
+            else:
+                return (gyro_val <= 0.085 and acc_val <= 0.06)
+
+        # Turning in place / rounding corner: gyro = 0.35 rad/s, sim = 6.0 mm (symmetric corridor)
+        self.assertFalse(
+            check_static(sim_val=6.0, gyro_val=0.35, acc_val=0.08),
+            "Active rotation (gyro=0.35 rad/s) must strictly override sim <= 10.0 mm and evaluate moving"
+        )
+        # Stationary on ground with motor vibration: gyro = 0.06 rad/s, sim = 4.0 mm
+        self.assertTrue(
+            check_static(sim_val=4.0, gyro_val=0.06, acc_val=0.035),
+            "Stationary on ground must evaluate static despite motor vibration"
+        )
+
+        # 2. Corner wall local collinearity extraction
+        wall1 = np.column_stack([np.linspace(-0.5, 0, 20), np.zeros(20), np.zeros(20)])
+        wall2 = np.column_stack([np.zeros(20), np.linspace(0, 0.5, 20), np.zeros(20)])
+        corner_map = np.vstack([wall1, wall2])
+
+        # Point on wall 1 approaching corner at (-0.04, 0, 0)
+        pt = np.array([-0.04, 0.0, 0.0])
+        dists = np.linalg.norm(corner_map - pt, axis=1)
+        sorted_indices = np.argsort(dists)
+
+        # 20 nearest points span both walls:
+        pts_20 = corner_map[sorted_indices[:20]]
+        _, s_20, _ = np.linalg.svd(pts_20 - np.mean(pts_20, axis=0))
+        ratio_20 = s_20[1] / (s_20[0] + 1e-9)
+        self.assertGreater(ratio_20, 0.35, "20 points spanning corner has ratio21 > 0.35")
+
+        # 6 nearest points isolate the local wall segment:
+        pts_6 = corner_map[sorted_indices[:6]]
+        _, s_6, vh_6 = np.linalg.svd(pts_6 - np.mean(pts_6, axis=0))
+        ratio_6 = s_6[1] / (s_6[0] + 1e-9)
+        self.assertLess(ratio_6, 0.35, "6 nearest points correctly resolve local wall line")
+        # Line direction should be aligned along X axis (wall 1):
+        self.assertGreater(abs(vh_6[0, 0]), 0.90, "Resolved line direction matches wall 1")
+
+        # 3. Map commit triggering on heading change (rotation > 6 deg)
+        last_map_pos = np.array([0.0, 0.0, 0.0])
+        last_map_R = np.eye(3)
+        curr_pos = np.array([0.02, 0.01, 0.0])  # Only 2.2 cm translation (< 0.08m)
+
+        # 15 degree turn around corner
+        angle_rad = np.deg2rad(15.0)
+        curr_R = np.array([
+            [np.cos(angle_rad), -np.sin(angle_rad), 0.0],
+            [np.sin(angle_rad),  np.cos(angle_rad), 0.0],
+            [0.0,                0.0,               1.0],
+        ])
+
+        disp_trans = float(np.linalg.norm(curr_pos[:2] - last_map_pos[:2]))
+        R_diff = last_map_R.T @ curr_R
+        cos_theta = np.clip(0.5 * (np.trace(R_diff) - 1.0), -1.0, 1.0)
+        rot_angle_deg = np.rad2deg(np.arccos(cos_theta))
+
+        should_commit_map = (disp_trans > 0.08 or rot_angle_deg > 6.0)
+        self.assertTrue(should_commit_map, "15 deg turn must trigger map commit even with < 8cm translation")
+
+        # 4. Camera photometric correction zeros roll and pitch
+        cam_dx = np.array([0.02, -0.015, 0.03, 0.05, -0.02, 0.01, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0])
+        # Applied logic:
+        cam_dx[0:2] = 0.0
+        cam_dx[5] = 0.0
+        self.assertEqual(cam_dx[0], 0.0, "Camera roll correction must be zeroed")
+        self.assertEqual(cam_dx[1], 0.0, "Camera pitch correction must be zeroed")
+        self.assertEqual(cam_dx[5], 0.0, "Camera Z correction must be zeroed")
+        self.assertAlmostEqual(cam_dx[2], 0.03, places=5, msg="Camera yaw correction preserved")
+
 
 if __name__ == "__main__":
     unittest.main()

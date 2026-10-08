@@ -216,7 +216,7 @@ class ESIKFStateEstimator:
                 ratio31 = s[2] / (s[0] + 1e-9)  # smallest spread / largest spread
 
 
-                if ratio21 < 0.3:  # optional stricter check, or just an else
+                if ratio21 < 0.35:
                     # Edge/line feature: store direction to calculate dynamic residual later
                     direction = vh[0, :]  # principal direction of the line
                     valid_associations.append(('line', point_lidar, center, direction))
@@ -226,16 +226,37 @@ class ESIKFStateEstimator:
                             f"s1/s0={ratio21:.3f}, "
                             f"s2/s0={ratio31:.3f}"
                         )
-                elif ratio21 > 0.3 and ratio31<0.1:
-                    normal = vh[-1, :]  # Plane normal vector
+                elif len(neighbors) >= 6:
+                    # For points near L-shaped corners or wall junctions, 20 neighbors span across
+                    # the corner, causing ratio21 >= 0.35. Test local collinearity on the immediate 6
+                    # nearest neighbors to isolate the local wall segment this point actually belongs to.
+                    sub_neighbors = neighbors[:6]
+                    sub_center = np.mean(sub_neighbors, axis=0)
+                    _, sub_s, sub_vh = np.linalg.svd(sub_neighbors - sub_center)
+                    sub_ratio21 = sub_s[1] / (sub_s[0] + 1e-9)
+                    if sub_s[0] > 1e-6 and sub_ratio21 < 0.35:
+                        direction = sub_vh[0, :]
+                        valid_associations.append(('line', point_lidar, sub_center, direction))
+                        if DEBUG_LIDAR:
+                            print(
+                                f"CORNER LOCAL LINE: s={sub_s}, "
+                                f"s1/s0={sub_ratio21:.3f}"
+                            )
+                    elif ratio21 > 0.3 and ratio31 < 0.1:
+                        # Planar surface patch
+                        normal = vh[-1, :]
+                        valid_associations.append(('plane', point_lidar, center, normal))
+                    else:
+                        if DEBUG_LIDAR:
+                            print(
+                                f"REJECT: s={s}, "
+                                f"s1/s0={ratio21:.3f}, "
+                                f"s2/s0={ratio31:.3f}"
+                            )
+                        continue  # True corner apex or non-planar noise: skip degenerate feature
+                elif ratio21 > 0.3 and ratio31 < 0.1:
+                    normal = vh[-1, :]
                     valid_associations.append(('plane', point_lidar, center, normal))
-                    if DEBUG_LIDAR:
-                        print("Singular Values for plane:", s)
-                        print(
-                            f"PLANE: s={s}, "
-                            f"s1/s0={ratio21:.3f}, "
-                            f"s2/s0={ratio31:.3f}"
-                        )
                 else:
                     if DEBUG_LIDAR:
                         print(

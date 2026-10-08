@@ -254,6 +254,7 @@ def camera_thread(cam, state_lock, buffer_lock, filter, map, imu_state_buffer, c
             K = np.linalg.solve(S_inv, weight * H.T)
 
             # Zero out blocked dimensions on K so covariance doesn't artificially shrink:
+            K[0:2, :]   = 0.0  # Zero out roll/pitch for planar ground/table platform
             K[5, :]     = 0.0  # Zero out Z translation (camera cannot observe vertical heave on planar points)
             K[6:9, :]   = 0.0  # Zero out velocity (camera cannot observe velocity directly)
             K[9:12, :]  = 0.0  # Zero out gyro bias
@@ -287,6 +288,7 @@ def camera_thread(cam, state_lock, buffer_lock, filter, map, imu_state_buffer, c
                 dx[0:3]   = 0.0  # Lock rotation when platform is confirmed static
                 dx[3:6]   = 0.0  # Lock translation when platform is confirmed static
             else:
+                dx[0:2]   = 0.0  # 2D planar platform: zero out roll/pitch corrections to keep horizon level
                 dx[5]     = 0.0  # Zero out Z translation (camera cannot observe vertical heave on planar points)
             dx[6:9]   = 0.0  # Zero out velocity (camera cannot observe velocity directly)
             dx[9:12]  = 0.0  # Zero out gyro bias
