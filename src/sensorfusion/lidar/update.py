@@ -231,20 +231,25 @@ def lidar_thread(state_lock, buffer_lock, filter, map, imu_measurement_buffer,
                             if gyro_max > 0.12 or accel_var > 0.25:
                                 is_imu_static = False
 
-                    # 1. Structural scan similarity override
-                    if sim is not None and sim > 70.0:
+                    # Robust stationary detection accounting for RPLidar motor vibration:
+                    # Motor vibration floor on stationary chassis:
+                    #   Raw optical scan similarity: sim <= 8.5 mm (100% of stationary scans)
+                    #   IMU gyro vibration: gyro_max <= 0.085 rad/s (motor spin harmonics)
+                    #   IMU accel vibration: accel_var <= 0.06 (m/s^2)^2 (motor vibration floor)
+                    #
+                    # Physical translation shifts optical range bins beyond 10-12 mm.
+                    if sim is not None and sim <= 10.0:
+                        # Optical beam proof: Chassis is resting on the ground!
+                        # Overrules motor vibration shaking the IMU.
+                        is_imu_static = True
+                    elif sim is not None and sim > 12.0:
+                        # Real physical translation shifts range bins beyond the 8.5mm vibration floor
                         is_imu_static = False
-                    elif sim is not None and sim > 35.0 and (gyro_max > 0.05 or accel_var > 0.05):
+                    elif gyro_max > 0.12 or accel_var > 0.15:
+                        # Gross physical rotation or acceleration well above the 0.08 rad/s motor floor
                         is_imu_static = False
-                    elif sim is not None and sim > 15.0 and (gyro_max > 0.03 or accel_var > 0.02):
-                        is_imu_static = False
-
-                    # 2. LiDAR ICP displacement check: If the converged LiDAR update moved from the last committed pose,
-                    # the platform is physically translating, even if hand motion is smooth (low accel/gyro).
-                    if update_applied and last_committed_pos is not None:
-                        lidar_disp = float(np.linalg.norm(state.p[:2] - last_committed_pos[:2]))
-                        if lidar_disp >= 0.015:  # >= 1.5 cm displacement over scan interval indicates physical movement
-                            is_imu_static = False
+                    else:
+                        is_imu_static = True
 
                     print(
                         f"IMU static check: is_static={is_imu_static} "

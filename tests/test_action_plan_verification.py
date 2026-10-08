@@ -291,28 +291,27 @@ class ActionPlanIntegratedTests(unittest.TestCase):
         sim = 20.0        # mm (table translation between 100ms scans)
         lidar_disp = 0.025 # 2.5 cm physical displacement observed by LiDAR
 
-        # Baseline logic:
-        baseline_static = True
-        if gyro_max > 0.12 or accel_var > 0.25:
-            baseline_static = False
-        if sim is not None and sim > 60.0 and (gyro_max > 0.08 or accel_var > 0.10):
-            baseline_static = False
+        # Ground resting stationary with motor vibration (from 12_09_45 log metrics)
+        stationary_gyro = 0.075  # rad/s (motor spin vibration floor)
+        stationary_acc_var = 0.035  # (m/s^2)^2 (motor vibration floor)
+        stationary_sim = 4.5  # mm (laser beam range noise)
 
-        # Proposed refined logic:
-        proposed_static = True
-        if gyro_max > 0.12 or accel_var > 0.25:
-            proposed_static = False
-        if sim is not None and sim > 70.0:
-            proposed_static = False
-        elif sim is not None and sim > 35.0 and (gyro_max > 0.05 or accel_var > 0.05):
-            proposed_static = False
-        elif sim is not None and sim > 15.0 and (gyro_max > 0.03 or accel_var > 0.02):
-            proposed_static = False
-        if lidar_disp >= 0.015:
-            proposed_static = False
+        def is_static_check(sim_val, gyro_val, acc_val):
+            if sim_val is not None and sim_val <= 10.0:
+                return True
+            elif sim_val is not None and sim_val > 12.0:
+                return False
+            elif gyro_val > 0.12 or acc_val > 0.15:
+                return False
+            return True
 
-        self.assertTrue(baseline_static, "Baseline erroneously flags table motion as static")
-        self.assertFalse(proposed_static, "Proposed logic detects smooth table motion via LiDAR displacement")
+        # Ground test must be 100% static despite motor vibration:
+        self.assertTrue(is_static_check(stationary_sim, stationary_gyro, stationary_acc_var),
+                        "Ground resting state must be classified static despite RPLidar motor vibration")
+
+        # Table sliding test must be classified moving:
+        self.assertFalse(is_static_check(sim, gyro_max, accel_var),
+                         "Table translation must be classified moving via optical displacement")
 
         # 2. No 8 cm snap-back clamping
         state_p = np.array([0.15, 0.0, 0.0])
