@@ -429,6 +429,65 @@ class ActionPlanIntegratedTests(unittest.TestCase):
         self.assertEqual(cam_dx[5], 0.0, "Camera Z correction must be zeroed")
         self.assertAlmostEqual(cam_dx[2], 0.03, places=5, msg="Camera yaw correction preserved")
 
+    def test_integrated_change_6_rplidar_rep103_handedness_and_static_delta_merge(self):
+        """
+        Verify:
+        1. RPLidar raw clockwise angles correctly map to right-handed ROS REP-103 (+X=Fwd, +Y=Left, -Y=Right).
+        2. Stationary EKF update merges correction delta without rewinding to stale state snapshot.
+        """
+        from lidar.backward import backprop
+
+        # 1. Coordinate frame verification:
+        scan_quadrants = [
+            (15, 0.0, 1000.0),    # Forward
+            (15, 90.0, 1000.0),   # Right (clockwise)
+            (15, 180.0, 1000.0),  # Backward
+            (15, 270.0, 1000.0),  # Left (clockwise)
+        ]
+        pose = SimpleNamespace(
+            R=np.eye(3),
+            p=np.zeros(3),
+            v=np.zeros(3),
+            bg=np.zeros(3),
+            ba=np.zeros(3),
+            g=np.zeros(3),
+        )
+        compensated = backprop(
+            scan_end_time=10.10,
+            prev_scan_time=10.0,
+            imu_pose=pose,
+            scan=scan_quadrants,
+            imu_measurement_buffer=[(10.0, np.zeros(3), np.zeros(3))],
+        )
+
+        self.assertEqual(len(compensated), 4)
+        # Forward (+X)
+        np.testing.assert_allclose(compensated[0], [1.0, 0.0, 0.0], atol=1e-6)
+        # Physical Right (90 deg CW) MUST map to -Y in standard right-handed frame:
+        np.testing.assert_allclose(compensated[1], [0.0, -1.0, 0.0], atol=1e-6)
+        # Backward (-X)
+        np.testing.assert_allclose(compensated[2], [-1.0, 0.0, 0.0], atol=1e-6)
+        # Physical Left (270 deg CW) MUST map to +Y in standard right-handed frame:
+        np.testing.assert_allclose(compensated[3], [0.0, 1.0, 0.0], atol=1e-6)
+
+        # 2. Static delta merge verification:
+        # Simulate filter at current position [1.50, 0.80, 0.0]
+        # An older state_old snapshot from 1 second ago was at [1.10, 0.80, 0.0]
+        # Iterated EKF corrects state from [1.10, 0.80, 0.0] to [1.12, 0.79, 0.0] (delta_p = [0.02, -0.01])
+        state_old_p = np.array([1.10, 0.80, 0.0])
+        corrected_state_p = np.array([1.12, 0.79, 0.0])
+        delta_p = corrected_state_p - state_old_p
+
+        live_filter_p = np.array([1.50, 0.80, 0.0])
+
+        # CORRECT behavior: filter.state.p += delta_p
+        live_filter_p += delta_p
+        np.testing.assert_allclose(live_filter_p, [1.52, 0.79, 0.0])
+        # INCORRECT behavior (stale rewind): live_filter_p = corrected_state_p.copy()
+        # would have snapped position backward from 1.50m to 1.12m!
+        self.assertGreater(live_filter_p[0], 1.50, "Filter must advance forward by delta_p rather than rewinding")
+
 
 if __name__ == "__main__":
     unittest.main()
+

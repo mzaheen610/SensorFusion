@@ -91,8 +91,9 @@ def backprop(scan_end_time, prev_scan_time, imu_pose, scan, imu_measurement_buff
         if pose_j is None:
             pose_j = imu_pose
 
-        # Transform the point to the scan end time frame using the pose_j
-        angle = np.deg2rad(point[1])
+        # Convert RPLidar raw clockwise angle to standard right-handed counter-clockwise angle (ROS REP-103)
+        angle_rh = (360.0 - point[1]) % 360.0
+        angle = np.deg2rad(angle_rh)
         distance = point[2] / 1000.0  # convert mm to meters
         point_body = np.array([distance * np.cos(angle), distance * np.sin(angle), 0.0])  # point in body frame
         R_kj = imu_pose.R.T @ pose_j.R

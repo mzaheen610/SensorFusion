@@ -274,23 +274,25 @@ def lidar_thread(state_lock, buffer_lock, filter, map, imu_measurement_buffer,
                     delta_p = state.p - state_old.p
                     delta_R = state_old.R.T @ state.R
                     if is_platform_static:
-                        # When static, lock directly to the map-corrected pose;
-                        # never forcefully snap back to last_committed_pos (which erases real motion).
-                        filter.state.p = state.p.copy()
+                        # When static, merge correction delta directly into latest filter state;
+                        # never replace with stale state_old snapshot from the past.
+                        filter.state.p += delta_p
+                        filter.state.p[2] = 0.0
                         filter.state.v = np.zeros(3)
                         delta_v = np.zeros(3)
                     else:
                         filter.state.p += delta_p
+                        filter.state.p[2] = 0.0
                         # Reconcile velocity from successive LiDAR-committed positions to prevent open-loop IMU runaway
                         if last_committed_time is not None and last_committed_pos is not None:
                             dt_scan = scan_timestamp - last_committed_time
                             # Guard against stale baseline: only compute velocity if continuous moving scans (dt <= 0.6s and not just exiting static)
                             if 0.08 <= dt_scan <= 0.60 and not prev_is_platform_static:
-                                disp = float(np.linalg.norm(state.p[:2] - last_committed_pos[:2]))
+                                disp = float(np.linalg.norm(filter.state.p[:2] - last_committed_pos[:2]))
                                 if disp < 0.015:  # Under 1.5cm displacement over scan interval is resting noise
                                     v_obs = np.zeros(3)
                                 else:
-                                    v_obs = (state.p - last_committed_pos) / dt_scan
+                                    v_obs = (filter.state.p - last_committed_pos) / dt_scan
                                     v_obs[2] = 0.0
                                 speed_obs = float(np.linalg.norm(v_obs[:2]))
                                 MAX_PLATFORM_SPEED = 1.5  # Realistic ceiling for table/hand/robot translation
@@ -314,7 +316,7 @@ def lidar_thread(state_lock, buffer_lock, filter, map, imu_measurement_buffer,
                         else:
                             delta_v = np.zeros(3)
 
-                    last_committed_pos = state.p.copy()
+                    last_committed_pos = filter.state.p.copy()
                     last_committed_time = scan_timestamp
                     prev_is_platform_static = is_platform_static
 

@@ -13,7 +13,7 @@ try:
 except ImportError:
     HAS_CV2 = False
 
-def receive_stream(robot_ip="10.215.180.214", port=5000):
+def receive_stream(robot_ip="10.128.153.214", port=5000):
     client = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     print(f"Connecting to Robot at {robot_ip}:{port}...")
     client.connect((robot_ip, port))
@@ -141,7 +141,10 @@ def receive_stream(robot_ip="10.215.180.214", port=5000):
             # Set camera on first frame with data
             # -----------------------------
             if first_frame and (pcd_added or line_set_added):
-                visualizer.reset_view_point(True)
+                ctr = visualizer.get_view_control()
+                ctr.set_up([1.0, 0.0, 0.0])       # Forward (+X) points UP on screen
+                ctr.set_front([0.0, 0.0, -1.0])   # Look straight down at the ground
+                ctr.set_lookat([0.0, 0.0, 0.0])
                 first_frame = False
 
             visualizer.poll_events()
@@ -160,4 +163,4 @@ def receive_stream(robot_ip="10.215.180.214", port=5000):
         client.close()
 
 if __name__ == "__main__":
-    receive_stream(robot_ip="10.215.180.214", port=5000)
+    receive_stream(robot_ip="10.128.153.214", port=5000)
