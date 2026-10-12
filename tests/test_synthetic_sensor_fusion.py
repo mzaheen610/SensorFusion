@@ -77,7 +77,7 @@ class SyntheticBackpropagationTests(unittest.TestCase):
         self.assertLess(np.linalg.norm(compensated, axis=1).max(), 15.0)
         np.testing.assert_allclose(
             compensated[0],
-            np.array([0.207873, 0.00725, 0.0]),
+            np.array([0.207873, -0.00725, 0.0]),
             atol=2e-3,
         )
 

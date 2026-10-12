@@ -141,7 +141,10 @@ def receive_stream(robot_ip="10.141.167.214", port=5000):
             # Set camera on first frame with data
             # -----------------------------
             if first_frame and (pcd_added or line_set_added):
-                visualizer.reset_view_point(True)
+                ctr = visualizer.get_view_control()
+                ctr.set_up([1.0, 0.0, 0.0])       # Forward (+X) points UP on screen
+                ctr.set_front([0.0, 0.0, -1.0])   # Look straight down at the ground
+                ctr.set_lookat([0.0, 0.0, 0.0])
                 first_frame = False
 
             visualizer.poll_events()

@@ -397,7 +397,7 @@ class ESIKFStateEstimator:
                 dx[12:15] = 0.0
                 dx[15:18] = 0.0
 
-                max_rotation_correction = np.deg2rad(15.0)
+                max_rotation_correction = np.deg2rad(25.0)
                 max_position_correction = 0.08 if getattr(self, 'is_static', False) else 0.80  # Plausible correction bound; 0.08 when static prevents jumping to ghost walls
                 if (
                     not np.all(np.isfinite(dx))

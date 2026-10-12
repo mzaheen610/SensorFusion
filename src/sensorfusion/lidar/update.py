@@ -224,9 +224,9 @@ def lidar_thread(state_lock, buffer_lock, filter, map, imu_measurement_buffer,
                             accels = np.array([m[2] for m in recent_imu])
                             gyro_max = float(np.max(np.linalg.norm(gyros, axis=1)))
                             accel_var = float(np.var(np.linalg.norm(accels, axis=1)))
-                            # Moving if angular speed > 0.12 rad/s (~6.9 deg/s) or accel magnitude variance > 0.25 (m/s^2)^2.
-                            # Motor vibration floor can reach ~0.15-0.20 (m/s^2)^2 depending on chassis/table resonance when stationary.
-                            if gyro_max > 0.12 or accel_var > 0.25:
+                            # Moving if angular speed > 0.12 rad/s (~6.9 deg/s) or accel magnitude variance > 0.30 (m/s^2)^2.
+                            # Motor vibration floor can reach ~0.15-0.25 (m/s^2)^2 depending on chassis/table resonance when stationary.
+                            if gyro_max > 0.12 or accel_var > 0.30:
                                 is_imu_static = False
 
                     # Only flag non-static if LiDAR motion is sustained, or if IMU variance is not negligible
@@ -260,19 +260,21 @@ def lidar_thread(state_lock, buffer_lock, filter, map, imu_measurement_buffer,
                             filter.state.p = last_committed_pos.copy()
                         else:
                             filter.state.p = state.p.copy()
+                        filter.state.p[2] = 0.0
                         filter.state.v = np.zeros(3)
                         delta_v = np.zeros(3)
                     else:
                         filter.state.p += delta_p
+                        filter.state.p[2] = 0.0
                         # Reconcile velocity from successive LiDAR-committed positions to prevent open-loop IMU runaway
                         if last_committed_time is not None and last_committed_pos is not None:
                             dt_scan = scan_timestamp - last_committed_time
                             if 0.08 <= dt_scan <= 1.5:
-                                disp = np.linalg.norm(state.p[:2] - last_committed_pos[:2])
+                                disp = np.linalg.norm(filter.state.p[:2] - last_committed_pos[:2])
                                 if disp < 0.04:  # Under 4cm displacement over scan interval is noise, not real velocity
                                     v_obs = np.zeros(3)
                                 else:
-                                    v_obs = (state.p - last_committed_pos) / dt_scan
+                                    v_obs = (filter.state.p - last_committed_pos) / dt_scan
                                     v_obs[2] = 0.0
                                 speed_obs = float(np.linalg.norm(v_obs[:2]))
                                 MAX_PLATFORM_SPEED = 0.8

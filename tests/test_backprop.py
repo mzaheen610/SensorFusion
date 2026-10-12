@@ -41,7 +41,8 @@ class BackpropTests(unittest.TestCase):
 
         self.assertEqual(len(compensated), 2)
         np.testing.assert_allclose(compensated[0], np.array([1.0, 0.0, 0.0]), atol=1e-8)
-        np.testing.assert_allclose(compensated[1], np.array([0.0, 2.0, 0.0]), atol=1e-8)
+        # 90 deg clockwise RPLidar point is physically to the robot's right (-Y in REP-103)
+        np.testing.assert_allclose(compensated[1], np.array([0.0, -2.0, 0.0]), atol=1e-8)
 
     def test_backprop_uses_timestamped_imu_history(self):
         imu_pose = make_pose()
