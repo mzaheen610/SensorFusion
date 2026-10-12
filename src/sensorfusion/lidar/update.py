@@ -227,31 +227,29 @@ def lidar_thread(state_lock, buffer_lock, filter, map, imu_measurement_buffer,
                             accels = np.array([m[2] for m in recent_imu])
                             gyro_max = float(np.max(np.linalg.norm(gyros, axis=1)))
                             accel_var = float(np.var(np.linalg.norm(accels, axis=1)))
-                            # Moving if angular speed > 0.12 rad/s (~6.9 deg/s) or accel magnitude variance > 0.25 (m/s^2)^2.
-                            # Motor vibration floor can reach ~0.15-0.20 (m/s^2)^2 depending on chassis/table resonance when stationary.
-                            if gyro_max > 0.12 or accel_var > 0.25:
-                                is_imu_static = False
 
                     # Robust stationary detection accounting for RPLidar motor vibration vs active platform motion:
-                    # Motor vibration floor on stationary chassis:
+                    # Motor vibration floor on stationary chassis with RPLidar spinning:
                     #   Raw optical scan similarity: sim <= 8.5 mm (100% of stationary scans)
-                    #   IMU gyro vibration: gyro_max <= 0.085 rad/s (motor spin harmonics)
-                    #   IMU accel vibration: accel_var <= 0.06 (m/s^2)^2 (motor vibration floor)
+                    #   IMU gyro vibration: gyro_max up to ~0.075 rad/s (motor spin harmonics)
+                    #   IMU accel vibration: accel_var up to ~0.18-0.20 (m/s^2)^2 (motor mechanical resonance)
                     #
-                    # Physical rotation or gross acceleration MUST take strict precedence over optical scan similarity,
-                    # because body-centric range bins in symmetric corridors or slow pivot turns can easily yield sim <= 10.0 mm.
-                    if gyro_max > 0.070 or accel_var > 0.12:
-                        # Gross physical rotation or acceleration well above the motor vibration floor
-                        is_imu_static = False
-                    elif sim is not None and sim > 12.0:
-                        # Real physical translation shifts range bins beyond the 8.5mm vibration floor
+                    # Physical rotation MUST take precedence over optical scan similarity to detect
+                    # in-place pivot turns in symmetric rooms, but motor vibration (accel_var <= 0.25)
+                    # must NOT override optical proof of rest (sim <= 10.0 mm).
+                    if gyro_max > 0.078 or accel_var > 0.25:
+                        # Gross physical rotation (> 4.5 deg/s) or high acceleration beyond motor floor
                         is_imu_static = False
                     elif sim is not None and sim <= 10.0:
-                        # Optical beam proof: Chassis is resting on the ground!
-                        # Overrules motor vibration shaking the IMU.
+                        # Optical beam proof: Chassis laser beams did not translate!
+                        # Overrules RPLidar chassis motor vibration floor.
                         is_imu_static = True
+                    elif sim is not None and sim > 13.0:
+                        # Real physical translation shifts range bins beyond resting floor
+                        is_imu_static = False
                     else:
-                        is_imu_static = (gyro_max <= 0.050 and accel_var <= 0.06)
+                        # Marginal range (10 < sim <= 13 or sim is None): IMU fallback
+                        is_imu_static = (gyro_max <= 0.060 and accel_var <= 0.12)
 
                     print(
                         f"IMU static check: is_static={is_imu_static} "
@@ -273,9 +271,11 @@ def lidar_thread(state_lock, buffer_lock, filter, map, imu_measurement_buffer,
                     # IMU-predicted state; never replace it with a stale snapshot.
                     delta_p = state.p - state_old.p
                     delta_R = state_old.R.T @ state.R
-                    if is_platform_static:
-                        # When static, merge correction delta directly into latest filter state;
-                        # never replace with stale state_old snapshot from the past.
+                    if is_platform_static or is_imu_static:
+                        # When static (or confirmed stationary on this scan), merge correction
+                        # delta directly into latest filter state and clamp velocity to zero.
+                        # Setting velocity to zero on the very first static scan stops IMU
+                        # velocity integration dead in its tracks before waiting for static_count >= 2.
                         filter.state.p += delta_p
                         filter.state.p[2] = 0.0
                         filter.state.v = np.zeros(3)
@@ -289,26 +289,28 @@ def lidar_thread(state_lock, buffer_lock, filter, map, imu_measurement_buffer,
                             # Guard against stale baseline: compute velocity for continuous moving scans (allow up to 1.50s on embedded SBCs)
                             if 0.08 <= dt_scan <= 1.50 and not prev_is_platform_static:
                                 disp = float(np.linalg.norm(filter.state.p[:2] - last_committed_pos[:2]))
-                                if disp < 0.015:  # Under 1.5cm displacement over scan interval is resting noise
+                                if disp < 0.035:  # Under 3.5cm displacement over scan interval is resting/jitter noise
                                     v_obs = np.zeros(3)
+                                    filter.state.v[:2] *= 0.5  # Actively dampen small residual velocity
+                                    delta_v = np.array([-0.5 * filter.state.v[0], -0.5 * filter.state.v[1], 0.0])
                                 else:
                                     v_obs = (filter.state.p - last_committed_pos) / dt_scan
                                     v_obs[2] = 0.0
-                                speed_obs = float(np.linalg.norm(v_obs[:2]))
-                                MAX_PLATFORM_SPEED = 1.5  # Realistic ceiling for table/hand/robot translation
-                                if speed_obs > MAX_PLATFORM_SPEED:
-                                    v_obs[:2] = (v_obs[:2] / speed_obs) * MAX_PLATFORM_SPEED
+                                    speed_obs = float(np.linalg.norm(v_obs[:2]))
+                                    MAX_PLATFORM_SPEED = 1.5  # Realistic ceiling for table/hand/robot translation
+                                    if speed_obs > MAX_PLATFORM_SPEED:
+                                        v_obs[:2] = (v_obs[:2] / speed_obs) * MAX_PLATFORM_SPEED
 
-                                # Pull live IMU velocity towards displacement velocity smoothly (alpha_v = 0.4 avoids spikes)
-                                alpha_v = 0.4
-                                v_reconciled = (1.0 - alpha_v) * filter.state.v[:2] + alpha_v * v_obs[:2]
-                                delta_v = np.array([
-                                    v_reconciled[0] - filter.state.v[0],
-                                    v_reconciled[1] - filter.state.v[1],
-                                    0.0,
-                                ])
-                                filter.state.v[:2] = v_reconciled
-                                filter.state.v[2] = 0.0
+                                    # Pull live IMU velocity towards displacement velocity smoothly (alpha_v = 0.4 avoids spikes)
+                                    alpha_v = 0.4
+                                    v_reconciled = (1.0 - alpha_v) * filter.state.v[:2] + alpha_v * v_obs[:2]
+                                    delta_v = np.array([
+                                        v_reconciled[0] - filter.state.v[0],
+                                        v_reconciled[1] - filter.state.v[1],
+                                        0.0,
+                                    ])
+                                    filter.state.v[:2] = v_reconciled
+                                    filter.state.v[2] = 0.0
                             elif prev_is_platform_static:
                                 # When transitioning from static to moving, start velocity cleanly from zero
                                 filter.state.v = np.zeros(3)
@@ -346,6 +348,8 @@ def lidar_thread(state_lock, buffer_lock, filter, map, imu_measurement_buffer,
                             item[1].p += delta_p
                             item[1].p[2] = 0.0
                             item[1].R = item[1].R @ delta_R
+                            if is_platform_static or is_imu_static:
+                                item[1].v[:] = 0.0
                     if DEBUG_LIDAR:
                         print(
                             "LiDAR merge committed:",

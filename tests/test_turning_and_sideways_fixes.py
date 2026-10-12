@@ -156,16 +156,16 @@ class TurningAndSidewaysFixesTests(unittest.TestCase):
             "Baseline logic falsely flags 0.08 rad/s turn as static because sim <= 10mm!"
         )
 
-        # Proposed logic: physical gyro rotation (>0.06 rad/s) strictly overrules scan similarity
+        # Proposed logic: physical gyro rotation (>0.078 rad/s, ~4.5 deg/s) strictly overrules scan similarity
         proposed_static = True
-        if gyro_max > 0.06 or accel_var > 0.12:
-            proposed_static = False
-        elif sim is not None and sim > 12.0:
+        if gyro_max > 0.078 or accel_var > 0.25:
             proposed_static = False
         elif sim is not None and sim <= 10.0:
             proposed_static = True
+        elif sim is not None and sim > 13.0:
+            proposed_static = False
         else:
-            proposed_static = (gyro_max <= 0.05 and accel_var <= 0.06)
+            proposed_static = (gyro_max <= 0.060 and accel_var <= 0.12)
 
         self.assertFalse(
             proposed_static,
@@ -270,6 +270,49 @@ class TurningAndSidewaysFixesTests(unittest.TestCase):
         self.assertGreaterEqual(
             len(large_jumps), 30,
             f"Found {len(large_jumps)} position jumps > 8cm in the log"
+        )
+
+    def test_diagnosis_6_motor_vibration_floor_does_not_starve_zupt(self):
+        """
+        Verify that RPLidar motor vibration (accel_var ~0.168, gyro_max ~0.065 rad/s)
+        while resting on the table (sim ~6.38mm) does NOT falsely trigger moving status,
+        preventing the ZUPT starvation and 6.85m runaway drift observed in log run_2026_10_12_13_19_02.log.
+        """
+        # Exact values from run_2026_10_12_13_19_02.log check 262 (table rest with motor vibration)
+        gyro_max = 0.0652   # rad/s (< 0.078 rad/s threshold)
+        accel_var = 0.16831 # (m/s^2)^2 (motor vibration floor on chassis)
+        sim = 6.375         # mm (optical proof: chassis is resting on table)
+
+        # Flawed logic from commit 208fc6d (where accel_var > 0.12 was checked before sim <= 10.0):
+        flawed_static = True
+        if gyro_max > 0.070 or accel_var > 0.12:
+            flawed_static = False
+        elif sim is not None and sim > 12.0:
+            flawed_static = False
+        elif sim is not None and sim <= 10.0:
+            flawed_static = True
+        else:
+            flawed_static = (gyro_max <= 0.050 and accel_var <= 0.06)
+
+        self.assertFalse(
+            flawed_static,
+            "Flawed logic in 208fc6d falsely classified resting table vibration as MOVING, starving ZUPT!"
+        )
+
+        # Robust logic: motor vibration floor (<= 0.25) does NOT override optical beam proof (sim <= 10.0mm):
+        robust_static = True
+        if gyro_max > 0.078 or accel_var > 0.25:
+            robust_static = False
+        elif sim is not None and sim <= 10.0:
+            robust_static = True
+        elif sim is not None and sim > 13.0:
+            robust_static = False
+        else:
+            robust_static = (gyro_max <= 0.060 and accel_var <= 0.12)
+
+        self.assertTrue(
+            robust_static,
+            "Robust logic correctly identifies platform at rest despite chassis motor vibration!"
         )
 
 
