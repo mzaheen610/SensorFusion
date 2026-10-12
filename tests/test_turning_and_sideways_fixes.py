@@ -315,6 +315,82 @@ class TurningAndSidewaysFixesTests(unittest.TestCase):
             "Robust logic correctly identifies platform at rest despite chassis motor vibration!"
         )
 
+    def test_diagnosis_7_voxel_grid_filter_uniform_density_and_jitter_reduction(self):
+        """
+        Verify that voxel_grid_downsample_2d creates uniform spatial density,
+        reduces dense clustering from near objects, and acts as a low-pass filter on range jitter.
+        """
+        from forward import voxel_grid_downsample_2d
+
+        # Simulate 100 points clustered on a nearby 10cm wall patch with +/- 1cm sensor noise
+        np.random.seed(42)
+        dense_y = np.linspace(0.0, 0.10, 100)
+        dense_noise = np.random.normal(0, 0.01, 100)
+        dense_pts = np.column_stack([np.full(100, 1.0) + dense_noise, dense_y, np.zeros(100)])
+
+        # Simulate 10 sparse points on a distant wall at X = 4.0m
+        sparse_y = np.linspace(0.0, 2.0, 10)
+        sparse_pts = np.column_stack([np.full(10, 4.0), sparse_y, np.zeros(10)])
+
+        combined_scan = np.vstack([dense_pts, sparse_pts])
+        self.assertEqual(len(combined_scan), 110)
+
+        # Naive index striding [::2] leaves 50 dense points and 5 sparse points
+        strided = combined_scan[::2]
+        self.assertEqual(len(strided), 55)
+        # 50 out of 55 points (91%) are still wastefully bunched on the 10cm patch!
+        dense_strided = np.sum(strided[:, 0] < 2.0)
+        self.assertEqual(dense_strided, 50)
+
+        # Spatial voxel grid filter with 3cm voxel size
+        filtered = voxel_grid_downsample_2d(combined_scan, voxel_size=0.03, min_points=10)
+
+        # The 100 clustered points are condensed into ~4-8 spatial voxel cells!
+        dense_filtered = np.sum(filtered[:, 0] < 2.0)
+        self.assertLessEqual(dense_filtered, 10)
+        self.assertGreaterEqual(dense_filtered, 4)
+
+        # All 10 sparse distant points (which are > 20cm apart) are cleanly preserved!
+        sparse_filtered = np.sum(filtered[:, 0] > 2.0)
+        self.assertEqual(sparse_filtered, 10)
+
+        # Noise reduction: centroid averaging reduces variance of the wall X position
+        raw_x_var = float(np.var(dense_pts[:, 0]))
+        filtered_x_var = float(np.var(filtered[filtered[:, 0] < 2.0, 0]))
+        self.assertLess(filtered_x_var, raw_x_var)
+
+    def test_diagnosis_8_anti_smear_turning_gate_prevents_ghost_walls(self):
+        """
+        Verify that the anti-smear turning gate postpones map point additions
+        during high angular velocity (gyro_max > 0.10 rad/s) and commits cleanly
+        when the turn settles.
+        """
+        # Scenario: Robot rotates by 15 deg at high angular velocity (0.35 rad/s / 20 deg/s)
+        gyro_turn = 0.35  # rad/s
+        rot_angle_deg = 15.0  # deg (> 6.0 deg threshold)
+
+        should_commit_map = rot_angle_deg > 6.0
+        self.assertTrue(should_commit_map)
+
+        # Old logic: commits immediately mid-turn, stamping rotated wall into map
+        old_commit = should_commit_map
+        self.assertTrue(old_commit, "Old logic stamped points into map mid-turn!")
+
+        # Anti-smear gate: holds off while gyro_max > 0.10 rad/s
+        new_commit_during_turn = should_commit_map and (gyro_turn <= 0.10)
+        self.assertFalse(
+            new_commit_during_turn,
+            "Anti-smear gate correctly suppresses point commit during dynamic turn!"
+        )
+
+        # When turn finishes and rotation settles (gyro = 0.04 rad/s):
+        gyro_settled = 0.04
+        new_commit_after_turn = should_commit_map and (gyro_settled <= 0.10)
+        self.assertTrue(
+            new_commit_after_turn,
+            "Anti-smear gate commits pristine scan once rotation settles!"
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

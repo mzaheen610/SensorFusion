@@ -364,7 +364,7 @@ def lidar_thread(state_lock, buffer_lock, filter, map, imu_measurement_buffer,
                             flush=True,
                         )
                 # Add points to map if the robot translated > 0.08m OR rotated > 6.0 deg
-                if points_world is not None and update_applied and not is_platform_static:
+                if points_world is not None and update_applied:
                     should_commit_map = False
                     if last_map_pos is None or last_map_R is None:
                         should_commit_map = True
@@ -376,7 +376,10 @@ def lidar_thread(state_lock, buffer_lock, filter, map, imu_measurement_buffer,
                         if disp_trans > 0.08 or rot_angle_deg > 6.0:
                             should_commit_map = True
 
-                    if should_commit_map:
+                    # Anti-smear turning guard: only commit new map points when angular motion has settled
+                    # (gyro_max <= 0.10 rad/s, ~5.7 deg/s). Committing points mid-turn stamps rotated wall slices
+                    # into voxels. Once rotation settles, the accumulated rotation cleanly commits the new view.
+                    if should_commit_map and (gyro_max is None or gyro_max <= 0.10):
                         map.add_points(points_world)
                         last_map_pos = filter.state.p.copy()
                         last_map_R = filter.state.R.copy()

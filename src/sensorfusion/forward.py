@@ -22,6 +22,30 @@ class State:
     ba:np.ndarray #Accel Bias (3,)
     g:np.ndarray #Gravity (3,)
 
+def voxel_grid_downsample_2d(points: np.ndarray, voxel_size: float = 0.03, min_points: int = 35) -> np.ndarray:
+    """
+    Downsamples a 2D planar LiDAR point cloud to uniform spatial density using a voxel grid.
+    Prevents nearby dense clusters from dominating the ICP optimization over distant walls
+    and acts as a spatial low-pass filter to reduce sensor range jitter.
+    """
+    if points is None or len(points) <= min_points:
+        return points
+
+    voxel_coords = np.floor(points[:, :2] / voxel_size).astype(np.int32)
+    voxel_dict = {}
+    for pt, coord in zip(points, voxel_coords):
+        key = (coord[0], coord[1])
+        if key not in voxel_dict:
+            voxel_dict[key] = [pt]
+        else:
+            voxel_dict[key].append(pt)
+
+    filtered = np.array([np.mean(pts, axis=0) for pts in voxel_dict.values()])
+    # Defensive fallback: if voxel grid was too coarse, retain at least strided points
+    if len(filtered) < min_points:
+        return points[::2]
+    return filtered
+
 class ESIKFStateEstimator:
     def __init__(self):
         self.P = 1 * np.eye(18) # process covariance matrix
@@ -180,9 +204,9 @@ class ESIKFStateEstimator:
             T_GI_init[:3, :3] = state.R
             T_GI_init[:3, 3] = state.p
 
-            #downsample the lidar points to reduce computational load
-            # Downsample by striding every 2nd point (70 well-distributed points instead of 140)
-            points_to_associate = lidar_points_compensated[::2]
+            # Spatial voxel grid filter replaces naive index striding:
+            # Guarantees uniform spatial density, averages range jitter, and cuts redundant ICP computation
+            points_to_associate = voxel_grid_downsample_2d(lidar_points_compensated, voxel_size=0.03, min_points=35)
 
             for point_lidar in points_to_associate:
                 # Transform each point from lidar frame to the world frame based on current pose
