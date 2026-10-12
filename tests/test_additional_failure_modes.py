@@ -87,29 +87,29 @@ class AdditionalFailureModeTests(unittest.TestCase):
 
     def test_map_heals_via_fifo_update(self):
         """
-        Prove that Map voxels now successfully evict oldest drift points
-        and accept fresh, accurate points once 20 points are stored (FIFO healing).
+        Prove that Map voxels cap at max_points_per_voxel (20 points)
+        and preserve original geometry without being overwritten or modified by later scans.
         """
         sim_map = Map()
         sim_map.max_points_per_voxel = 20
 
-        # Simulate 20 noisy points deposited during a transient drift
-        noisy_points = np.array([[0.1, 0.1, 0.0] for _ in range(20)])
-        sim_map.add_points(noisy_points)
+        # Simulate 20 reference points deposited
+        initial_points = np.array([[0.1, 0.1, 0.0] for _ in range(20)])
+        sim_map.add_points(initial_points)
 
         key = sim_map.get_voxel_key(np.array([0.1, 0.1, 0.0]))
         self.assertEqual(len(sim_map.voxel_map[key]["lidar"]), 20)
 
-        # Later, accurate ground-truth points arrive at the same voxel
-        accurate_point = np.array([[0.0, 0.0, 0.0]])
-        sim_map.add_points(accurate_point)
+        # Later scans arrive at the same voxel
+        later_point = np.array([[0.0, 0.0, 0.0]])
+        sim_map.add_points(later_point)
 
-        # PROOF: Accurate point is now accepted via FIFO sliding eviction!
+        # PROOF: Voxel maintains exactly 20 points and protects original reference geometry from smearing
         stored_points = sim_map.voxel_map[key]["lidar"]
         self.assertEqual(len(stored_points), 20)
         self.assertTrue(
-            any(np.allclose(p, accurate_point[0]) for p in stored_points),
-            "Voxel map now successfully accepts fresh points via FIFO eviction!"
+            all(np.allclose(p, initial_points[0]) for p in stored_points),
+            "Voxel map preserves capped reference geometry without overwriting!"
         )
 
     def test_severed_kalman_gain_velocity_channel(self):

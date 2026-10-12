@@ -55,15 +55,11 @@ class Map:
                         "color": []
                     }
                 voxel = self.voxel_map[key]
-                # Sliding FIFO window: when voxel reaches max capacity, evict oldest point
-                # to allow fresh observations to overwrite stale drift/ghost points.
-                if len(voxel["lidar"]) >= self.max_points_per_voxel:
-                    voxel["lidar"].pop(0)
-                    voxel["color"].pop(0)
-                    voxel["image"].pop(0)
-                voxel["lidar"].append(point)
-                voxel["color"].append(np.array([128.0, 128.0, 128.0]))  # placeholder gray
-                voxel["image"].append(None)  # store image patch per point
+                # Cap the points in a voxel to bound the map size and prevent smearing/overwriting mapped geometry
+                if len(voxel["lidar"]) < self.max_points_per_voxel:
+                    voxel["lidar"].append(point)
+                    voxel["color"].append(np.array([128.0, 128.0, 128.0]))  # placeholder gray
+                    voxel["image"].append(None)  # store image patch per point
 
     def query(self, point, min_points_in_voxel=10, radius_voxels=1):
         # Find neighbors from the current voxel first.
