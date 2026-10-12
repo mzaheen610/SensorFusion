@@ -240,18 +240,18 @@ def lidar_thread(state_lock, buffer_lock, filter, map, imu_measurement_buffer,
                     #
                     # Physical rotation or gross acceleration MUST take strict precedence over optical scan similarity,
                     # because body-centric range bins in symmetric corridors or slow pivot turns can easily yield sim <= 10.0 mm.
-                    if gyro_max > 0.10 or accel_var > 0.20:
-                        # Gross physical rotation or acceleration well above the 0.08 rad/s motor floor
+                    if gyro_max > 0.070 or accel_var > 0.12:
+                        # Gross physical rotation or acceleration well above the motor vibration floor
+                        is_imu_static = False
+                    elif sim is not None and sim > 12.0:
+                        # Real physical translation shifts range bins beyond the 8.5mm vibration floor
                         is_imu_static = False
                     elif sim is not None and sim <= 10.0:
                         # Optical beam proof: Chassis is resting on the ground!
                         # Overrules motor vibration shaking the IMU.
                         is_imu_static = True
-                    elif sim is not None and sim > 12.0:
-                        # Real physical translation shifts range bins beyond the 8.5mm vibration floor
-                        is_imu_static = False
                     else:
-                        is_imu_static = (gyro_max <= 0.085 and accel_var <= 0.06)
+                        is_imu_static = (gyro_max <= 0.050 and accel_var <= 0.06)
 
                     print(
                         f"IMU static check: is_static={is_imu_static} "
@@ -286,8 +286,8 @@ def lidar_thread(state_lock, buffer_lock, filter, map, imu_measurement_buffer,
                         # Reconcile velocity from successive LiDAR-committed positions to prevent open-loop IMU runaway
                         if last_committed_time is not None and last_committed_pos is not None:
                             dt_scan = scan_timestamp - last_committed_time
-                            # Guard against stale baseline: only compute velocity if continuous moving scans (dt <= 0.6s and not just exiting static)
-                            if 0.08 <= dt_scan <= 0.60 and not prev_is_platform_static:
+                            # Guard against stale baseline: compute velocity for continuous moving scans (allow up to 1.50s on embedded SBCs)
+                            if 0.08 <= dt_scan <= 1.50 and not prev_is_platform_static:
                                 disp = float(np.linalg.norm(filter.state.p[:2] - last_committed_pos[:2]))
                                 if disp < 0.015:  # Under 1.5cm displacement over scan interval is resting noise
                                     v_obs = np.zeros(3)
@@ -309,9 +309,12 @@ def lidar_thread(state_lock, buffer_lock, filter, map, imu_measurement_buffer,
                                 ])
                                 filter.state.v[:2] = v_reconciled
                                 filter.state.v[2] = 0.0
-                            else:
+                            elif prev_is_platform_static:
                                 # When transitioning from static to moving, start velocity cleanly from zero
                                 filter.state.v = np.zeros(3)
+                                delta_v = np.zeros(3)
+                            else:
+                                # Large timing gap (> 1.5s): do not violently zero out moving velocity; preserve live IMU velocity
                                 delta_v = np.zeros(3)
                         else:
                             delta_v = np.zeros(3)
@@ -333,6 +336,16 @@ def lidar_thread(state_lock, buffer_lock, filter, map, imu_measurement_buffer,
                     filter.state.ba += state.ba - state_old.ba
                     filter.state.g[:] = 0.0
                     filter.P = P_new
+
+                    # Retroactively propagate correction deltas to all past states in imu_state_buffer
+                    # to keep buffered priors consistent with the live filter state.
+                    # This prevents subsequent scans whose timestamps fall in the processing latency window
+                    # from linearizing around uncorrected baselines and double-counting the displacement.
+                    with buffer_lock:
+                        for item in imu_state_buffer:
+                            item[1].p += delta_p
+                            item[1].p[2] = 0.0
+                            item[1].R = item[1].R @ delta_R
                     if DEBUG_LIDAR:
                         print(
                             "LiDAR merge committed:",

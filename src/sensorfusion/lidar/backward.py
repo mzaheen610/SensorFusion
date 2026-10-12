@@ -8,10 +8,20 @@ from utils.so3_rotation import exp
 import numpy as np
 from copy import deepcopy
 
+def copy_state(state):
+    return type(state)(
+        R=state.R.copy(),
+        p=state.p.copy(),
+        v=state.v.copy(),
+        bg=state.bg.copy() if hasattr(state, 'bg') else np.zeros(3),
+        ba=state.ba.copy() if hasattr(state, 'ba') else np.zeros(3),
+        g=state.g.copy() if hasattr(state, 'g') else np.zeros(3),
+    )
+
 def build_backward_trajectory(scan_end_time, imu_pose, imu_measurement_buffer, min_time):
     """Walk backward once, caching pose at each IMU timestamp."""
-    trajectory = [(scan_end_time, deepcopy(imu_pose))]
-    pose_j = deepcopy(imu_pose)
+    trajectory = [(scan_end_time, copy_state(imu_pose))]
+    pose_j = copy_state(imu_pose)
     current_time = scan_end_time
     for imu_time, gyro, accel in reversed(imu_measurement_buffer):
         if imu_time >= current_time:
@@ -21,8 +31,8 @@ def build_backward_trajectory(scan_end_time, imu_pose, imu_measurement_buffer, m
         dt = current_time - imu_time
         if dt <= 0.0 or dt > 0.2:
             break
-        pose_j = compute_prev_pose(pose_j, dt, gyro, accel)  # only deepcopies once per step now
-        trajectory.append((imu_time, deepcopy(pose_j)))
+        pose_j = compute_prev_pose(pose_j, dt, gyro, accel)
+        trajectory.append((imu_time, copy_state(pose_j)))
         current_time = imu_time
     return trajectory 
 
@@ -47,7 +57,7 @@ def interpolated_pose(trajectory, target_time):
     return trajectory[-1][1]
 
 def compute_prev_pose(current_state, delta_time, gyro, accel):
-    x_prev = deepcopy(current_state)
+    x_prev = copy_state(current_state)
     # A = self.compute_jacobian(x_prev, u)#compute the jacobian of the state transition model
 
     # Implement the prediction step of the Kalman filter here
