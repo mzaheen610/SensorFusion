@@ -7,7 +7,7 @@ import numpy as np
 from queue import Empty, Full
 from lidar.backward import backprop
 from utils.similarity import scan_similarity, scan_to_bins
-from utils.so3_rotation import log
+from utils.so3_rotation import log, reorthonormalize
 # Set to True when inspecting individual scans. Keep False during normal runs
 # because console I/O can noticeably reduce throughput on a Raspberry Pi.
 DEBUG_LIDAR = False
