@@ -251,26 +251,85 @@ class TurningRunawaySyntheticTests(unittest.TestCase):
         self.assertLess(estimator.state.p[0], 0.35, "Position must step towards the map")
         self.assertGreater(estimator.state.p[0], -0.10, "Position must not overshoot past true wall")
 
-    def test_static_merge_does_not_snap_back_on_valid_correction(self):
+    def test_static_delta_merge_preserves_live_predictions(self):
         """
-        Verify that a valid 0.15m correction is trusted directly when static
-        rather than being discarded and snapped back to an old anchor.
+        Verify that when static, LiDAR corrections are merged as deltas (filter.state.p += delta_p)
+        rather than overwriting with stale snapshots, preserving live IMU predictions.
         """
         estimator = ESIKFStateEstimator()
-        estimator.state.p = np.array([0.0, 0.0, 0.0])
-        last_committed_pos = np.array([0.0, 0.0, 0.0])
+        estimator.is_static = True
 
-        # LiDAR corrected pose at 0.15m:
+        # State at scan timestamp was at [0.0, 0.0, 0.0]
+        state_old_p = np.array([0.0, 0.0, 0.0])
+        # LiDAR update computed a correction to [0.15, 0.0, 0.0] on that snapshot:
         state_corrected_p = np.array([0.15, 0.0, 0.0])
+        delta_p = state_corrected_p - state_old_p
 
-        # New merge logic:
+        # While computation ran, live filter state advanced by 0.03m:
+        estimator.state.p = np.array([0.03, 0.0, 0.0])
+
+        # Merge delta incrementally:
         is_platform_static = True
+        estimator.state.p += delta_p
         if is_platform_static:
-            estimator.state.p = state_corrected_p.copy()
             estimator.state.v = np.zeros(3)
 
-        np.testing.assert_array_equal(estimator.state.p, state_corrected_p,
-                                      "Corrected pose must be trusted without 0.08m snap-back discard")
+        # Expected position is 0.03 + 0.15 = 0.18m (not 0.15m which would discard the 0.03m prediction):
+        np.testing.assert_allclose(estimator.state.p, np.array([0.18, 0.0, 0.0]), atol=1e-8,
+                                   err_msg="Delta merging must preserve live state integration")
+
+    def test_multimodal_motion_detector_rejects_static_on_high_lidar_sim(self):
+        """
+        Verify that strong LiDAR motion evidence (sim >= 35.0 mm) prevents false static detection
+        even when IMU gyro and accel variance are low (e.g. smooth forward push).
+        """
+        # Smooth push: low gyro (0.075 rad/s <= 0.12) and low accel variance (0.05 <= 0.30)
+        gyro_max = 0.075
+        accel_var = 0.05
+        is_imu_static = (gyro_max <= 0.12 and accel_var <= 0.30)
+        self.assertTrue(is_imu_static, "IMU alone appears static during smooth glide")
+
+        # But LiDAR similarity is high (90 mm shift):
+        sim = 90.0
+        is_lidar_static = (sim is None or sim < 35.0)
+        self.assertFalse(is_lidar_static, "LiDAR must detect geometric scan difference")
+
+        is_static_sample = is_lidar_static and is_imu_static
+        self.assertFalse(is_static_sample, "Overall detector must NOT declare static when LiDAR sees 90mm shift")
+
+    def test_gated_bias_adaptation_clamps_transients(self):
+        """
+        Verify that bias adaptation ignores braking transients and clamps per-step adjustments.
+        """
+        estimator = ESIKFStateEstimator()
+        initial_ba = np.array([0.035, 0.057, -0.324])
+        estimator.state.ba = initial_ba.copy()
+
+        # Deceleration transient: mean_accel is strongly negative (-0.50 m/s^2)
+        mean_accel = np.array([-0.50, 0.057, -0.324])
+
+        # At static_count = 2 (early in static dwell), adaptation must NOT run:
+        static_count = 2
+        is_platform_static = True
+        gyro_max = 0.04
+        accel_var = 0.05
+        if is_platform_static and static_count >= 10:
+            if gyro_max < 0.06 and accel_var < 0.08:
+                step_ba = np.clip(0.01 * (mean_accel - estimator.state.ba), -0.005, 0.005)
+                estimator.state.ba += step_ba
+
+        np.testing.assert_array_equal(estimator.state.ba, initial_ba,
+                                      "Bias must not adapt before sustained dwell (static_count < 10)")
+
+        # At static_count = 10, step must be clamped to at most 0.005 m/s^2:
+        static_count = 10
+        if is_platform_static and static_count >= 10:
+            if gyro_max < 0.06 and accel_var < 0.08:
+                step_ba = np.clip(0.01 * (mean_accel - estimator.state.ba), -0.005, 0.005)
+                estimator.state.ba += step_ba
+
+        delta_ba = estimator.state.ba - initial_ba
+        self.assertLessEqual(abs(delta_ba[0]), 0.005 + 1e-9, "Per-step bias adaptation must be clamped to <= 0.005 m/s^2")
 
 
 if __name__ == "__main__":

@@ -229,16 +229,19 @@ def lidar_thread(state_lock, buffer_lock, filter, map, imu_measurement_buffer,
                             if gyro_max <= 0.12 and accel_var <= 0.30:
                                 is_imu_static = True
 
-                    # Only flag non-static if LiDAR motion is sustained, or if IMU variance is not negligible
-                    if sim is not None and sim > 60.0 and (gyro_max > 0.08 or accel_var > 0.10):
-                        is_imu_static = False
+                    # Multi-modal stationary check:
+                    # LiDAR motion: sim is median bin difference in mm (resting baseline is 1-15 mm).
+                    # If sim >= 35.0 mm, geometric scan displacement occurred -> platform is moving,
+                    # even if smooth motion didn't trip high IMU rotational or variance thresholds.
+                    is_lidar_static = (sim is None or sim < 35.0)
+                    is_static_sample = is_lidar_static and is_imu_static
 
                     print(
-                        f"IMU static check: is_static={is_imu_static} "
-                        f"(max_gyro={gyro_max:.4f} rad/s, accel_var={accel_var:.5f})"
+                        f"Motion check: is_static={is_static_sample} "
+                        f"(sim={sim:.2f if sim is not None else 0.0}, max_gyro={gyro_max:.4f} rad/s, accel_var={accel_var:.5f})"
                     )
 
-                    if is_imu_static:
+                    if is_static_sample:
                         static_count += 1
                     else:
                         static_count = 0
@@ -247,28 +250,31 @@ def lidar_thread(state_lock, buffer_lock, filter, map, imu_measurement_buffer,
                 is_platform_static = (static_count >= ZUPT_CONSECUTIVE_REQUIRED)
                 filter.is_static = is_platform_static
 
-                # When confirmed static, continuously track and adapt residual accelerometer and gyro biases
-                if is_platform_static and len(recent_imu) >= 5:
-                    mean_accel = np.mean([m[2] for m in recent_imu], axis=0)
-                    mean_gyro = np.mean([m[1] for m in recent_imu], axis=0)
-                    filter.state.ba = 0.95 * filter.state.ba + 0.05 * mean_accel
-                    filter.state.bg = 0.95 * filter.state.bg + 0.05 * mean_gyro
+                # Adapt residual biases only when stably stationary for a sustained dwell time (static_count >= 10, ~0.7s)
+                # with very quiet IMU variance to ensure braking/settling transients have completely decayed.
+                if is_platform_static and static_count >= 10 and len(recent_imu) >= 5:
+                    if gyro_max < 0.06 and accel_var < 0.08:
+                        mean_accel = np.mean([m[2] for m in recent_imu], axis=0)
+                        mean_gyro = np.mean([m[1] for m in recent_imu], axis=0)
+                        # Clamped, gentle learning rate (max delta 0.005 m/s^2 accel, 0.002 rad/s gyro per scan)
+                        step_ba = np.clip(0.01 * (mean_accel - filter.state.ba), -0.005, 0.005)
+                        step_bg = np.clip(0.01 * (mean_gyro - filter.state.bg), -0.002, 0.002)
+                        filter.state.ba += step_ba
+                        filter.state.bg += step_bg
 
                 if update_applied:
                     update_count += 1
                     # Merge the correction computed from state_old into the latest
-                    # IMU-predicted state; never replace it with a stale snapshot.
+                    # IMU-predicted state; always merge deltas incrementally to preserve fast integration.
                     delta_p = state.p - state_old.p
                     delta_R = state_old.R.T @ state.R
+                    filter.state.p += delta_p
+                    filter.state.p[2] = 0.0
+
                     if is_platform_static:
-                        # When static, trust the LiDAR map-corrected pose directly; no 8cm snap-back discard
-                        filter.state.p = state.p.copy()
-                        filter.state.p[2] = 0.0
                         filter.state.v = np.zeros(3)
                         delta_v = np.zeros(3)
                     else:
-                        filter.state.p += delta_p
-                        filter.state.p[2] = 0.0
                         # Reconcile velocity from successive LiDAR-committed positions to prevent open-loop IMU runaway
                         if last_committed_time is not None and last_committed_pos is not None:
                             dt_scan = scan_timestamp - last_committed_time
@@ -309,6 +315,7 @@ def lidar_thread(state_lock, buffer_lock, filter, map, imu_measurement_buffer,
                     last_committed_time = scan_timestamp
 
                     filter.state.R = filter.state.R @ delta_R
+                    filter.state.R = reorthonormalize(filter.state.R)
                     filter.state.bg += state.bg - state_old.bg
                     filter.state.ba += state.ba - state_old.ba
                     filter.state.g[:] = 0.0
@@ -326,10 +333,9 @@ def lidar_thread(state_lock, buffer_lock, filter, map, imu_measurement_buffer,
                             f"det_R={np.linalg.det(filter.state.R):.12f}",
                             flush=True,
                         )
-                # Add points if moved >= 0.10m, or if static but map is sparse (< 40 associations)
-                if points_world is not None and update_applied:
-                    is_sparse = getattr(filter, 'last_lidar_association_count', 100) < 40
-                    if (not is_platform_static and (last_map_pos is None or np.linalg.norm(filter.state.p[:2] - last_map_pos[:2]) > 0.10)) or (is_platform_static and is_sparse):
+                # Only add points if the robot has moved at least 0.10m from the last map commit
+                if points_world is not None and update_applied and not is_platform_static:
+                    if last_map_pos is None or np.linalg.norm(filter.state.p[:2] - last_map_pos[:2]) > 0.10:
                         map.add_points(points_world)
                         last_map_pos = filter.state.p.copy()
 
