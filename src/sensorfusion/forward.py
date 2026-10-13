@@ -104,16 +104,19 @@ class ESIKFStateEstimator:
         self.state.R = self.state.R @ delta_R  #del_theta = w*del_t --> converted to proper SO(3) before adding to the rotation matrix(SO(3))
         self.state.R = reorthonormalize(self.state.R) # prevent det(R) runaway
         if getattr(self, 'is_static', False):
-            # Windowed mean of horizontal acceleration to filter motor vibration spikes
-            if not hasattr(self, '_static_accel_ema'):
-                self._static_accel_ema = 0.0
-            accel_xy = float(np.linalg.norm(accel[:2]))
+            # Windowed mean of horizontal acceleration vector to filter out zero-mean motor vibration oscillations.
+            # Filtering the vector before taking the norm avoids rectifying high-frequency vibration into false DC acceleration.
+            if not hasattr(self, '_static_accel_ema_vec') or not isinstance(self._static_accel_ema_vec, np.ndarray):
+                self._static_accel_ema_vec = np.zeros(2)
             ang_norm = float(np.linalg.norm(ang_act))
-            self._static_accel_ema = 0.7 * self._static_accel_ema + 0.3 * accel_xy
+            self._static_accel_ema_vec = 0.65 * self._static_accel_ema_vec + 0.35 * accel[:2]
+            accel_ema_norm = float(np.linalg.norm(self._static_accel_ema_vec))
+            self._static_accel_ema = accel_ema_norm
 
-            # Exit static only on sustained turn (|w| > 0.20) or sustained horizontal acceleration (|a_xy| > 0.15)
-            if ang_norm > 0.20 or self._static_accel_ema > 0.15:
+            # Exit static only on sustained turn (|w| > 0.20) or sustained directional horizontal acceleration (|a_xy| > 0.20)
+            if ang_norm > 0.20 or accel_ema_norm > 0.20:
                 self.is_static = False
+                self._static_accel_ema_vec = np.zeros(2)
                 self._static_accel_ema = 0.0
             else:
                 self.state.v[:] = 0.0
@@ -201,13 +204,13 @@ class ESIKFStateEstimator:
             stride = max(1, n_comp // 40)
             points_to_associate = lidar_points_compensated[::stride][:40]
 
-            # Adaptive search radius: during dynamic motion or low prior associations,
-            # expand search radius to 2 voxels (±1.0m) to associate fast hand strokes (0.5-1.0m)
+            # Adaptive search radius: during dynamic motion, expand search radius to 2 voxels (±1.0m)
+            # to associate fast hand strokes (0.5-1.0m). When static, restrict strictly to 1 voxel (±0.5m) to avoid distant false associations.
             is_currently_static = getattr(self, 'is_static', False)
-            if not is_currently_static or getattr(self, 'last_lidar_association_count', 100) < 30:
-                search_radius = 2
-            else:
+            if is_currently_static:
                 search_radius = 1
+            else:
+                search_radius = 2
 
             for point_lidar in points_to_associate:
                 # Transform each point from lidar frame to the world frame based on current pose

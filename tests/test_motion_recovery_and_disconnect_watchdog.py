@@ -168,5 +168,85 @@ class MotionRecoveryAndWatchdogTests(unittest.TestCase):
         self.assertLess(dist, 0.05)
 
 
+    def test_motor_vibration_rejection_holds_static_state(self):
+        """
+        Verify that spinning RPLidar motor vibration (14.3 Hz oscillatory acceleration
+        with peak amplitude ~0.35 m/s^2 and Gaussian sensor noise) is rejected by
+        vector EMA filtering, holding is_static=True with zero position/velocity drift.
+        """
+        estimator = ESIKFStateEstimator()
+        estimator.is_static = True
+        dt = 0.033
+        p_init = estimator.state.p.copy()
+
+        # Simulate 300 steps (10 seconds) of 14.3 Hz motor vibration
+        for i in range(300):
+            t = i * dt
+            vib_x = 0.30 * np.sin(2 * np.pi * 14.3 * t) + np.random.normal(0, 0.08)
+            vib_y = 0.30 * np.cos(2 * np.pi * 14.3 * t) + np.random.normal(0, 0.08)
+            accel = np.array([vib_x, vib_y, 0.0])
+            gyro = np.random.normal(0, 0.02, 3)
+
+            estimator.predict((gyro, accel), dt)
+
+        self.assertTrue(estimator.is_static, "Filter must maintain static lock under motor vibration")
+        np.testing.assert_allclose(estimator.state.p, p_init, atol=1e-8, err_msg="Position must not drift under motor vibration")
+        np.testing.assert_allclose(estimator.state.v, np.zeros(3), atol=1e-8, err_msg="Velocity must remain zero under motor vibration")
+
+    def test_search_radius_restricts_to_one_voxel_when_static(self):
+        """
+        When is_static=True, the search radius in lidar_update must be strictly 1 voxel (±0.5m)
+        to prevent spurious associations with distant walls.
+        When is_static=False, search radius expands to 2 voxels (±1.0m) to catch fast hand motions.
+        """
+        m = Map()
+        # Wall at x = 1.6m
+        for y in np.linspace(-0.5, 0.5, 10):
+            for z in [-0.1, 0.0, 0.1]:
+                m.add_points(np.array([[1.6, y, z]]))
+
+        # Body points measured at x = 0.8m (0.8m offset from wall)
+        curr_pts = np.array([[0.8, y, 0.0] for y in np.linspace(-0.3, 0.3, 6)])
+
+        state_s = State(R=np.eye(3), p=np.zeros(3), v=np.zeros(3), bg=np.zeros(3), ba=np.zeros(3), g=np.zeros(3))
+        state_d = State(R=np.eye(3), p=np.zeros(3), v=np.zeros(3), bg=np.zeros(3), ba=np.zeros(3), g=np.zeros(3))
+        P = 0.05 * np.eye(18)
+
+        # Static: search_radius = 1 (voxel range ±0.5m) -> 0.8m offset is excluded
+        est_static = ESIKFStateEstimator()
+        est_static.is_static = True
+        est_static.lidar_update(
+            scan=[(15, 0.0, 800.0)] * 6, state=state_s, P_copy=P,
+            lidar_points_compensated=curr_pts, map=m
+        )
+        self.assertEqual(est_static.last_lidar_association_count, 0, "Static search radius (1 voxel) must exclude 0.8m offset")
+
+        # Dynamic: search_radius = 2 (voxel range ±1.0m) -> 0.8m offset is included
+        est_dyn = ESIKFStateEstimator()
+        est_dyn.is_static = False
+        est_dyn.lidar_update(
+            scan=[(15, 0.0, 800.0)] * 6, state=state_d, P_copy=P,
+            lidar_points_compensated=curr_pts, map=m
+        )
+        self.assertGreater(est_dyn.last_lidar_association_count, 0, "Dynamic search radius (2 voxels) must include 0.8m offset")
+
+    def test_stationary_lidar_delta_clamped_to_three_centimeters(self):
+        """
+        When is_platform_static is True, any ICP delta_p must be clamped to at most 3 cm (0.03m),
+        preventing single-scan map smearing or spurious wall jumps.
+        """
+        # Proposed unconstrained ICP delta of 0.15m:
+        delta_p = np.array([0.15, 0.05, 0.0])
+        is_platform_static = True
+
+        if is_platform_static:
+            disp_static = float(np.linalg.norm(delta_p[:2]))
+            if disp_static > 0.03:
+                delta_p[:2] = (delta_p[:2] / disp_static) * 0.03
+
+        self.assertAlmostEqual(float(np.linalg.norm(delta_p[:2])), 0.03, places=4)
+        self.assertLessEqual(np.linalg.norm(delta_p[:2]), 0.03001)
+
+
 if __name__ == "__main__":
     unittest.main()

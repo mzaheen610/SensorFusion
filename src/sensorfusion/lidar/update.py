@@ -198,16 +198,15 @@ def lidar_thread(state_lock, buffer_lock, filter, map, imu_measurement_buffer,
                         pass
 
             scan_duration = time.monotonic() - scan_start
-            if DEBUG_LIDAR:
-                print(
-                    f"LiDAR update diagnostics: compensated={len(lidar_points_compensated)} | "
-                    f"map_points={map.num_points()} | "
-                    f"associations={filter.last_lidar_association_count} | "
-                    f"applied={update_applied} | "
-                    f"residuals={filter.last_lidar_residual_count} | "
-                    f"duration={scan_duration:.3f}s",
-                    flush=True,
-                )
+            print(
+                f"LiDAR update diagnostics: compensated={len(lidar_points_compensated)} | "
+                f"map_points={map.num_points()} | "
+                f"associations={filter.last_lidar_association_count} | "
+                f"applied={update_applied} | "
+                f"residuals={filter.last_lidar_residual_count} | "
+                f"duration={scan_duration:.3f}s",
+                flush=True,
+            )
             with state_lock:
                 scan_count += 1
 
@@ -277,6 +276,12 @@ def lidar_thread(state_lock, buffer_lock, filter, map, imu_measurement_buffer,
                     # IMU-predicted state; always merge deltas incrementally to preserve fast integration.
                     delta_p = state.p - state_old.p
                     delta_R = state_old.R.T @ state.R
+                    if is_platform_static:
+                        disp_static = float(np.linalg.norm(delta_p[:2]))
+                        if disp_static > 0.03:
+                            delta_p[:2] = (delta_p[:2] / disp_static) * 0.03
+                        filter.state.v = np.zeros(3)
+                        delta_v = np.zeros(3)
                     filter.state.p += delta_p
                     filter.state.p[2] = 0.0
 
@@ -329,9 +334,16 @@ def lidar_thread(state_lock, buffer_lock, filter, map, imu_measurement_buffer,
                     filter.state.ba += state.ba - state_old.ba
                     filter.state.g[:] = 0.0
                     filter.P = P_new
+                    print(
+                        f"LiDAR merge committed: delta_p=[{delta_p[0]:.3f}, {delta_p[1]:.3f}], "
+                        f"p=[{filter.state.p[0]:.3f}, {filter.state.p[1]:.3f}], "
+                        f"v=[{filter.state.v[0]:.3f}, {filter.state.v[1]:.3f}], "
+                        f"static={is_platform_static}",
+                        flush=True,
+                    )
                     if DEBUG_LIDAR:
                         print(
-                            "LiDAR merge committed:",
+                            "LiDAR merge debug:",
                             f"delta_position={delta_p}",
                             f"delta_velocity={delta_v}",
                             f"position={filter.state.p}",
@@ -351,6 +363,8 @@ def lidar_thread(state_lock, buffer_lock, filter, map, imu_measurement_buffer,
                 if is_platform_static:
                     filter.zupt_update()
                     filter.state.v = np.zeros(3)
+                    last_committed_pos = filter.state.p.copy()
+                    last_committed_time = scan_timestamp
                     print(f"ZUPT applied | static_count={static_count}", flush=True)
 
             #DEBUG THE LIDAR SCAN AND EKF UPDATE RATE  
