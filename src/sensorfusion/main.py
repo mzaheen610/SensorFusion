@@ -166,19 +166,27 @@ if __name__ == "__main__":
         print(f"Warning: LiDAR wait timed out or failed: {e}")
 
     """
-    Initial imu residual calculation (absorbs silicon bias + motor vibration baseline)
+    Initial imu residual calculation (absorbs silicon bias + motor vibration baseline).
+    Wait for LiDAR motor to reach steady operating speed, then collect 300+ samples.
     """
+    print("Allowing LiDAR motor to reach full operating speed (5s)...")
+    time.sleep(5.0)
     accel_samples = []
-    for _ in range(100):
+    gyro_samples = []
+    for _ in range(300):
         reading = imu.get_readings()
         if reading is not None:
-            _, accel, _ = reading
-            accel_samples.append(accel)
+            gyro_sample, accel_sample, _ = reading
+            accel_samples.append(accel_sample)
+            gyro_samples.append(gyro_sample)
         time.sleep(0.01)
     if accel_samples:
         filter.state.ba = np.mean(accel_samples, axis=0)
+    if gyro_samples:
+        filter.state.bg = np.mean(gyro_samples, axis=0)
     filter.P[12:15, 12:15] = 1e-8 * np.eye(3)
-    print("Calibrated ba (body linear_accel baseline):", filter.state.ba)
+    print("Calibrated ba (body linear_accel baseline with spinning motor):", filter.state.ba)
+    print("Calibrated bg (body gyro baseline with spinning motor):", filter.state.bg)
 
     # Drain any scans buffered during calibration so workers start synchronized with fresh data
     while not lidar_scan_queue.empty():

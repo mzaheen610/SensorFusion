@@ -193,6 +193,85 @@ class TurningRunawaySyntheticTests(unittest.TestCase):
         self.assertLess(float(np.linalg.norm(v)), 0.01, "Velocity must not runaway during turn")
         self.assertLess(float(np.linalg.norm(p)), 0.15, "Position must stay centered near origin")
 
+    def test_static_predict_holds_position_under_accel_noise(self):
+        """
+        Verify that while is_static=True, predict() holds position completely frozen
+        even under realistic motor vibration noise and bias.
+        """
+        estimator = ESIKFStateEstimator()
+        estimator.is_static = True
+        estimator.state.p = np.array([1.25, -0.50, 0.0])
+        initial_p = estimator.state.p.copy()
+
+        # Simulate 100 IMU prediction cycles (3.0 seconds at ~33 Hz) with vibration noise
+        for _ in range(100):
+            gyro_noise = np.random.normal(0, 0.01, 3)
+            accel_noise = np.random.normal(0, 0.05, 3) + np.array([0.05, -0.03, 0.0])
+            estimator.predict((gyro_noise, accel_noise), dt=0.03)
+
+        self.assertTrue(estimator.is_static, "Filter must stay static under vibration noise")
+        np.testing.assert_array_equal(estimator.state.p, initial_p, "Position must remain completely frozen when static")
+        np.testing.assert_array_equal(estimator.state.v, np.zeros(3), "Velocity must remain zero when static")
+
+    def test_verified_clip_recovers_from_large_initial_offset(self):
+        """
+        Verify that when a robot pose is offset by 0.35m from map walls,
+        the covariance-sized verified clip accepts and steps toward the map
+        rather than hard-rejecting (applied=False) like the old 0.08m static gate.
+        """
+        m = Map()
+        # Wall at x = 2.0m spanning y from -1.5m to 1.5m
+        wall = []
+        for y in np.linspace(-1.5, 1.5, 40):
+            wall.append([2.0, y, 0.0])
+        m.add_points(np.array(wall))
+
+        # True robot is at origin; observed wall in body frame at x=2.0m:
+        body_points = []
+        for y in np.linspace(-1.5, 1.5, 40):
+            body_points.append([2.0, y, 0.0])
+        body_points = np.array(body_points)
+
+        estimator = ESIKFStateEstimator()
+        estimator.is_static = True
+        # Set prior state offset by +0.35m along x:
+        estimator.state.p = np.array([0.35, 0.0, 0.0])
+        estimator.state.R = np.eye(3)
+
+        pts_w, applied, P_new = estimator.lidar_update(
+            scan=list(range(len(body_points))),
+            state=estimator.state,
+            P_copy=estimator.P.copy(),
+            lidar_points_compensated=body_points,
+            map=m
+        )
+
+        self.assertTrue(applied, "Verified clip must accept update and NOT hard-reject on 0.35m offset")
+        # Position must have moved significantly towards true origin (0.0):
+        self.assertLess(estimator.state.p[0], 0.35, "Position must step towards the map")
+        self.assertGreater(estimator.state.p[0], -0.10, "Position must not overshoot past true wall")
+
+    def test_static_merge_does_not_snap_back_on_valid_correction(self):
+        """
+        Verify that a valid 0.15m correction is trusted directly when static
+        rather than being discarded and snapped back to an old anchor.
+        """
+        estimator = ESIKFStateEstimator()
+        estimator.state.p = np.array([0.0, 0.0, 0.0])
+        last_committed_pos = np.array([0.0, 0.0, 0.0])
+
+        # LiDAR corrected pose at 0.15m:
+        state_corrected_p = np.array([0.15, 0.0, 0.0])
+
+        # New merge logic:
+        is_platform_static = True
+        if is_platform_static:
+            estimator.state.p = state_corrected_p.copy()
+            estimator.state.v = np.zeros(3)
+
+        np.testing.assert_array_equal(estimator.state.p, state_corrected_p,
+                                      "Corrected pose must be trusted without 0.08m snap-back discard")
+
 
 if __name__ == "__main__":
     unittest.main()

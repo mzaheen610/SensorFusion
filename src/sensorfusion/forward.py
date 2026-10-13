@@ -103,10 +103,20 @@ class ESIKFStateEstimator:
         self.state.R = self.state.R @ delta_R  #del_theta = w*del_t --> converted to proper SO(3) before adding to the rotation matrix(SO(3))
         self.state.R = reorthonormalize(self.state.R) # prevent det(R) runaway
         if getattr(self, 'is_static', False):
-            if np.linalg.norm(ang_act) > 0.12 or np.linalg.norm(accel[:2]) > 0.40:
+            # Windowed mean of horizontal acceleration to filter motor vibration spikes
+            if not hasattr(self, '_static_accel_ema'):
+                self._static_accel_ema = 0.0
+            accel_xy = float(np.linalg.norm(accel[:2]))
+            ang_norm = float(np.linalg.norm(ang_act))
+            self._static_accel_ema = 0.7 * self._static_accel_ema + 0.3 * accel_xy
+
+            # Exit static only on sustained turn (|w| > 0.20) or sustained horizontal acceleration (|a_xy| > 0.15)
+            if ang_norm > 0.20 or self._static_accel_ema > 0.15:
                 self.is_static = False
+                self._static_accel_ema = 0.0
             else:
-                self.state.v = np.zeros(3)
+                self.state.v[:] = 0.0
+                self.state.p[2] = 0.0
 
         if not getattr(self, 'is_static', False):
             self.state.p += (self.state.v * dt) + (0.5 * accel * dt * dt) 
@@ -184,6 +194,9 @@ class ESIKFStateEstimator:
             # Downsample by striding every 2nd point (70 well-distributed points instead of 140)
             points_to_associate = lidar_points_compensated[::2]
 
+            # If previous scan had very few associations, expand search radius to 2 voxels (±1.0m relocalization)
+            search_radius = 2 if getattr(self, 'last_lidar_association_count', 100) < 30 else 1
+
             for point_lidar in points_to_associate:
                 # Transform each point from lidar frame to the world frame based on current pose
                 point = T_GI_init @ lidar_imu_extrinsic @ np.append(point_lidar, 1)
@@ -193,7 +206,7 @@ class ESIKFStateEstimator:
 
                 #find the k nearest points from the global map and fit a plane
                 # 4. Fit a plane using SVD
-                neighbors = map.query(point_world_coords)
+                neighbors = map.query(point_world_coords, radius_voxels=search_radius)
                 if neighbors is None or (len(neighbors) < 3):
                     continue
                 # if DEBUG_LIDAR:
@@ -247,7 +260,6 @@ class ESIKFStateEstimator:
 
             kalman_gain = None
             H = None
-            sigma_lidar = 0.02
             correction_applied = False
             self.last_lidar_association_count = len(valid_associations)
             max_iterations = 2
@@ -268,6 +280,7 @@ class ESIKFStateEstimator:
             for iter_count in range(max_iterations):
                 H_list = []
                 residuals = []
+                sigmas = []
                 T_GI[:3, :3] = state.R
                 T_GI[:3, 3] = state.p
 
@@ -275,6 +288,10 @@ class ESIKFStateEstimator:
                     # Transform each point using the continually updated state
                     point = T_GI @ lidar_imu_extrinsic @ np.append(point_lidar, 1)
                     point_coords = point[:3]
+
+                    # Range-dependent measurement noise: sigma = 0.01 + 0.01 * r
+                    r_beam = float(np.linalg.norm(point_lidar[:2]))
+                    sigma_k = 0.01 + 0.01 * min(max(r_beam, 0.5), 10.0)
 
                     #find the residual based on the normal and the center point
                     vec = point_coords - center
@@ -304,18 +321,17 @@ class ESIKFStateEstimator:
                         np.zeros(3),  # accel bias
                         np.zeros(3),  # gravity  
                     ])
-                    # Compute a dynamic residual gate based on pose uncertainity
-                    innovation_var = float(H_k @ P_copy @ H_k.T + sigma_lidar**2)
+                    # Compute a dynamic residual gate based on pose uncertainty
+                    innovation_var = float(H_k @ P_copy @ H_k.T + sigma_k**2)
                     k = 4
                     gate = max(0.80, k * np.sqrt(max(1e-9, innovation_var)))   # Wide enough to pull back drifted poses without rejection
                     if DEBUG_LIDAR:
                         print("Residual gate value:", gate)
                     if abs(res) > gate:
                         continue
-                    # if DEBUG_LIDAR:
-                    #     print("Plane residual:", res)
                     residuals.append(res)
                     H_list.append(H_k)
+                    sigmas.append(sigma_k)
 
                 if len(H_list) == 0:
                     if DEBUG_LIDAR:
@@ -345,8 +361,9 @@ class ESIKFStateEstimator:
                 if DEBUG_LIDAR:
                     print("Residual norm", np.linalg.norm(r))
 
-
-                R_inv = (1.0 / sigma_lidar**2) * np.eye(len(r)) 
+                sigma_arr = np.asarray(sigmas)
+                R_inv = np.diag(1.0 / (sigma_arr**2))
+                R_mat = np.diag(sigma_arr**2)
                 try:
                     kalman_gain = np.linalg.inv(H.T @ R_inv @ H + P_inv) @ (H.T @ R_inv)
                 except np.linalg.LinAlgError:
@@ -385,6 +402,7 @@ class ESIKFStateEstimator:
 
                 # Check if the optimization step has converged before state projection
                 if np.linalg.norm(dx) < eps:
+                    correction_applied = True
                     break
 
                 # Planar 2D robot constraints on state and covariance correction
@@ -397,24 +415,32 @@ class ESIKFStateEstimator:
                 dx[12:15] = 0.0
                 dx[15:18] = 0.0
 
-                max_rotation_correction = np.deg2rad(25.0)
-                max_position_correction = 0.08 if getattr(self, 'is_static', False) else 0.25  # Plausible correction bound: 0.08m static, 0.25m dynamic (~0.7m/s limit; blocks wall-sliding)
-                cum_pos = float(np.linalg.norm((state.p + dx[3:6])[:2] - state_0.p[:2]))
-                if (
-                    not np.all(np.isfinite(dx))
-                    or np.linalg.norm(dx[0:3]) > max_rotation_correction
-                    or np.linalg.norm(dx[3:6]) > max_position_correction
-                    or cum_pos > max_position_correction
-                ):
-                    if DEBUG_LIDAR:
-                        print(
-                            "Rejecting implausible correction: "
-                            f"rotation={np.linalg.norm(dx[0:3]):.3f} "
-                            f"position={np.linalg.norm(dx[3:6]):.3f} "
-                            f"cumulative={cum_pos:.3f}"
-                        )
+                if not np.all(np.isfinite(dx)):
                     correction_applied = False
                     break
+
+                # Verified clip sized from pose covariance
+                sigma_p = np.sqrt(max(0.0, float(P_copy[3, 3] + P_copy[4, 4])))
+                if getattr(self, 'is_static', False):
+                    max_position_correction = float(np.clip(3.0 * sigma_p, 0.15, 0.40))
+                else:
+                    max_position_correction = float(np.clip(3.0 * sigma_p, 0.25, 0.50))
+                max_rotation_correction = np.deg2rad(25.0)
+
+                # Clip step magnitude rather than hard-rejecting
+                pos_corr = float(np.linalg.norm(dx[3:6]))
+                if pos_corr > max_position_correction:
+                    dx[3:6] = (dx[3:6] / pos_corr) * max_position_correction
+
+                rot_corr = float(np.linalg.norm(dx[0:3]))
+                if rot_corr > max_rotation_correction:
+                    dx[0:3] = (dx[0:3] / rot_corr) * max_rotation_correction
+
+                cum_pos = float(np.linalg.norm((state.p + dx[3:6])[:2] - state_0.p[:2]))
+                if cum_pos > max_position_correction:
+                    dir_cum = (state.p + dx[3:6])[:2] - state_0.p[:2]
+                    target_cum = (dir_cum / cum_pos) * max_position_correction
+                    dx[3:5] = target_cum - (state.p[:2] - state_0.p[:2])
 
                 theta_rot = dx[0:3]
                 state.R = state.R @ exp(theta_rot)
@@ -434,7 +460,7 @@ class ESIKFStateEstimator:
                     best_kalman_gain = kalman_gain.copy()
                     # Joseph form covariance update to prevent collapse of P
                     I_KH = np.eye(P_copy.shape[0]) - kalman_gain @ H
-                    best_P_new = I_KH @ P_copy @ I_KH.T + kalman_gain @ (sigma_lidar**2 * np.eye(len(r))) @ kalman_gain.T
+                    best_P_new = I_KH @ P_copy @ I_KH.T + kalman_gain @ R_mat @ kalman_gain.T
                     best_P_new = 0.5 * (best_P_new + best_P_new.T)
                 if DEBUG_LIDAR:
                     print(

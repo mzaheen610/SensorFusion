@@ -10,7 +10,7 @@ from utils.similarity import scan_similarity, scan_to_bins
 from utils.so3_rotation import log
 # Set to True when inspecting individual scans. Keep False during normal runs
 # because console I/O can noticeably reduce throughput on a Raspberry Pi.
-DEBUG_LIDAR = True
+DEBUG_LIDAR = False
 
 
 #Moved the lidar scan acquisition to a seperate thread to limit lidar scan flag mismatch
@@ -209,9 +209,10 @@ def lidar_thread(state_lock, buffer_lock, filter, map, imu_measurement_buffer,
                     print("Scan similarity between scans is:", sim)
 
                     # IMU motion check over the scan interval (recent samples)
-                    is_imu_static = True
+                    is_imu_static = False
                     gyro_max = 0.0
                     accel_var = 0.0
+                    recent_imu = []
                     if imu_buffer:
                         recent_imu = [
                             m for m in imu_buffer
@@ -224,10 +225,9 @@ def lidar_thread(state_lock, buffer_lock, filter, map, imu_measurement_buffer,
                             accels = np.array([m[2] for m in recent_imu])
                             gyro_max = float(np.max(np.linalg.norm(gyros, axis=1)))
                             accel_var = float(np.var(np.linalg.norm(accels, axis=1)))
-                            # Moving if angular speed > 0.12 rad/s (~6.9 deg/s) or accel magnitude variance > 0.30 (m/s^2)^2.
-                            # Motor vibration floor can reach ~0.15-0.25 (m/s^2)^2 depending on chassis/table resonance when stationary.
-                            if gyro_max > 0.12 or accel_var > 0.30:
-                                is_imu_static = False
+                            # Static only if angular speed <= 0.12 rad/s and accel variance <= 0.30
+                            if gyro_max <= 0.12 and accel_var <= 0.30:
+                                is_imu_static = True
 
                     # Only flag non-static if LiDAR motion is sustained, or if IMU variance is not negligible
                     if sim is not None and sim > 60.0 and (gyro_max > 0.08 or accel_var > 0.10):
@@ -247,6 +247,13 @@ def lidar_thread(state_lock, buffer_lock, filter, map, imu_measurement_buffer,
                 is_platform_static = (static_count >= ZUPT_CONSECUTIVE_REQUIRED)
                 filter.is_static = is_platform_static
 
+                # When confirmed static, continuously track and adapt residual accelerometer and gyro biases
+                if is_platform_static and len(recent_imu) >= 5:
+                    mean_accel = np.mean([m[2] for m in recent_imu], axis=0)
+                    mean_gyro = np.mean([m[1] for m in recent_imu], axis=0)
+                    filter.state.ba = 0.95 * filter.state.ba + 0.05 * mean_accel
+                    filter.state.bg = 0.95 * filter.state.bg + 0.05 * mean_gyro
+
                 if update_applied:
                     update_count += 1
                     # Merge the correction computed from state_old into the latest
@@ -254,12 +261,8 @@ def lidar_thread(state_lock, buffer_lock, filter, map, imu_measurement_buffer,
                     delta_p = state.p - state_old.p
                     delta_R = state_old.R.T @ state.R
                     if is_platform_static:
-                        # When static, snap directly to map-corrected pose to eliminate
-                        # any open-loop IMU integration drift accumulated during scan computation.
-                        if last_committed_pos is not None and np.linalg.norm(state.p[:2] - last_committed_pos[:2]) > 0.08:
-                            filter.state.p = last_committed_pos.copy()
-                        else:
-                            filter.state.p = state.p.copy()
+                        # When static, trust the LiDAR map-corrected pose directly; no 8cm snap-back discard
+                        filter.state.p = state.p.copy()
                         filter.state.p[2] = 0.0
                         filter.state.v = np.zeros(3)
                         delta_v = np.zeros(3)
@@ -323,17 +326,16 @@ def lidar_thread(state_lock, buffer_lock, filter, map, imu_measurement_buffer,
                             f"det_R={np.linalg.det(filter.state.R):.12f}",
                             flush=True,
                         )
-                # Only add points if the robot has moved at least 0.10m from the last map commit
-                if points_world is not None and update_applied and not is_platform_static:
-                    if last_map_pos is None or np.linalg.norm(filter.state.p[:2] - last_map_pos[:2]) > 0.10:
+                # Add points if moved >= 0.10m, or if static but map is sparse (< 40 associations)
+                if points_world is not None and update_applied:
+                    is_sparse = getattr(filter, 'last_lidar_association_count', 100) < 40
+                    if (not is_platform_static and (last_map_pos is None or np.linalg.norm(filter.state.p[:2] - last_map_pos[:2]) > 0.10)) or (is_platform_static and is_sparse):
                         map.add_points(points_world)
                         last_map_pos = filter.state.p.copy()
 
                 if is_platform_static:
                     filter.zupt_update()
                     filter.state.v = np.zeros(3)
-                    last_committed_pos = filter.state.p.copy()
-                    last_committed_time = scan_timestamp
                     print(f"ZUPT applied | static_count={static_count}", flush=True)
 
             #DEBUG THE LIDAR SCAN AND EKF UPDATE RATE  
@@ -364,6 +366,8 @@ def lidar_thread(state_lock, buffer_lock, filter, map, imu_measurement_buffer,
 
         except Exception as e:
             print(f"[lidar_thread] FATAL: {type(e).__name__}: {e}", flush=True)
+            if "closed" in str(e).lower() or isinstance(e, (BrokenPipeError, EOFError)):
+                break
             continue
 
 def copy_state(state):
