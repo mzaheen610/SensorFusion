@@ -238,7 +238,7 @@ def lidar_thread(state_lock, buffer_lock, filter, map, imu_measurement_buffer,
 
                     print(
                         f"Motion check: is_static={is_static_sample} "
-                        f"(sim={sim:.2f if sim is not None else 0.0}, max_gyro={gyro_max:.4f} rad/s, accel_var={accel_var:.5f})"
+                        f"(sim={sim if sim is not None else 0.0:.2f}, max_gyro={gyro_max:.4f} rad/s, accel_var={accel_var:.5f})"
                     )
 
                     if is_static_sample:
