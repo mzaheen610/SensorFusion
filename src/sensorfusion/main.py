@@ -70,6 +70,11 @@ def imu_thread(imu, filter_ref):
         prev_time = now
 
         with state_lock:
+            last_lidar = getattr(filter_ref, 'last_lidar_time', None)
+            if last_lidar is not None and (now - last_lidar > 1.5):
+                filter_ref.is_static = True
+                filter_ref.state.v[:] = 0.0
+
             state, cov = filter_ref.predict((gyro, accel), dt)
             imu_state = (
                 now,

@@ -79,6 +79,7 @@ class Map:
                 return neighbors[np.argsort(distances)[:min_points_in_voxel * 2]]
 
             neighbors = list(current_points)
+            stop_search = False
             for dx in range(-radius_voxels, radius_voxels + 1):
                 for dy in range(-radius_voxels, radius_voxels + 1):
                     for dz in range(-radius_voxels, radius_voxels + 1):
@@ -89,7 +90,12 @@ class Map:
                         if nvoxel is not None and nvoxel["lidar"]:
                             neighbors.extend(nvoxel["lidar"])
                             if len(neighbors) >= min_points_in_voxel * 2:
-                                break  #stop early once we have enough points
+                                stop_search = True
+                                break  # stop early once we have enough points
+                    if stop_search:
+                        break
+                if stop_search:
+                    break
 
         if len(neighbors) == 0:
             return None
@@ -99,8 +105,9 @@ class Map:
         return neighbors[np.argsort(distances)[:min_points_in_voxel * 2]]
     
     def get_voxel_key(self, point):
-        #get the root voxel key since the voxel is 0.5x0.5x0.5 cube and multiple points could belong to the same voxel
-        return tuple(np.floor(point/self.voxel_size))
+        # get the root voxel key since the voxel is 0.5x0.5x0.5 cube and multiple points could belong to the same voxel
+        pt = np.asarray(point, dtype=float)
+        return tuple(np.floor(pt / self.voxel_size))
     
     # def query_visible_voxels(self, current_scan, state):
     #     #find the voxels in the map nearest to the measured points

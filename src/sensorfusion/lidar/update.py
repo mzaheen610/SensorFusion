@@ -22,7 +22,7 @@ def lidar_acquisition_thread(lidar, scan_queue, camera_scan_queue=None):
     while True:
         scan = lidar.get_readings()
         if scan is None:
-            # time.sleep(0.01)
+            time.sleep(0.05)
             continue
 
         scan_timestamp = time.monotonic()
@@ -104,7 +104,16 @@ def lidar_thread(state_lock, buffer_lock, filter, map, imu_measurement_buffer,
     last_map_pos = None
     while True:
         try:
-            scan_item = scan_queue.get()
+            try:
+                scan_item = scan_queue.get(timeout=1.0)
+            except Empty:
+                # Watchdog: no scan received for 1.0s (sensor disconnect or queue stall)
+                with state_lock:
+                    filter.is_static = True
+                    filter.state.v[:] = 0.0
+                continue
+
+            filter.last_lidar_time = time.monotonic()
             if len(scan_item) == 3:
                 scan_timestamp, scan, scan_start_time = scan_item
             else:
@@ -372,6 +381,9 @@ def lidar_thread(state_lock, buffer_lock, filter, map, imu_measurement_buffer,
 
         except Exception as e:
             print(f"[lidar_thread] FATAL: {type(e).__name__}: {e}", flush=True)
+            with state_lock:
+                filter.is_static = True
+                filter.state.v[:] = 0.0
             if "closed" in str(e).lower() or isinstance(e, (BrokenPipeError, EOFError)):
                 break
             continue

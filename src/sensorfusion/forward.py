@@ -3,6 +3,7 @@ Forward propogation for sensor fusion model.
 IMU integration
 """
 #IMU used is BNO055, Lidar is RPLidar A2M12, Camera is PiCamZero
+import time
 from dataclasses import dataclass
 from utils.so3_rotation import exp, skew, reorthonormalize
 import numpy as np
@@ -124,6 +125,11 @@ class ESIKFStateEstimator:
             self.state.p[2] = 0.0  # Planar robot constraint: 2D motion on ground/table
             self.state.v[2] = 0.0  # Zero unobservable vertical velocity
 
+            # Physical rolling friction / velocity decay when not actively accelerating
+            # Prevents braking deceleration transients from coasting open-loop indefinitely
+            if np.linalg.norm(accel[:2]) < 0.12:
+                self.state.v[:2] *= max(0.0, 1.0 - 2.0 * dt)
+
             # Safety speed limit for physical platform
             MAX_SPEED = 0.8  # m/s
             speed_xy = float(np.linalg.norm(self.state.v[:2]))
@@ -190,12 +196,18 @@ class ESIKFStateEstimator:
             T_GI_init[:3, :3] = state.R
             T_GI_init[:3, 3] = state.p
 
-            #downsample the lidar points to reduce computational load
-            # Downsample by striding every 2nd point (70 well-distributed points instead of 140)
-            points_to_associate = lidar_points_compensated[::2]
+            # Downsample the lidar points to reduce computational load (cap to at most 40 points)
+            n_comp = len(lidar_points_compensated)
+            stride = max(1, n_comp // 40)
+            points_to_associate = lidar_points_compensated[::stride][:40]
 
-            # If previous scan had very few associations, expand search radius to 2 voxels (±1.0m relocalization)
-            search_radius = 2 if getattr(self, 'last_lidar_association_count', 100) < 30 else 1
+            # Adaptive search radius: during dynamic motion or low prior associations,
+            # expand search radius to 2 voxels (±1.0m) to associate fast hand strokes (0.5-1.0m)
+            is_currently_static = getattr(self, 'is_static', False)
+            if not is_currently_static or getattr(self, 'last_lidar_association_count', 100) < 30:
+                search_radius = 2
+            else:
+                search_radius = 1
 
             for point_lidar in points_to_associate:
                 # Transform each point from lidar frame to the world frame based on current pose
@@ -324,7 +336,8 @@ class ESIKFStateEstimator:
                     # Compute a dynamic residual gate based on pose uncertainty
                     innovation_var = float(H_k @ P_copy @ H_k.T + sigma_k**2)
                     k = 4
-                    gate = max(0.80, k * np.sqrt(max(1e-9, innovation_var)))   # Wide enough to pull back drifted poses without rejection
+                    min_gate = 1.20 if search_radius >= 2 else 0.80
+                    gate = max(min_gate, k * np.sqrt(max(1e-9, innovation_var)))   # Wide enough to pull back drifted poses without rejection
                     if DEBUG_LIDAR:
                         print("Residual gate value:", gate)
                     if abs(res) > gate:
@@ -490,6 +503,7 @@ class ESIKFStateEstimator:
             lidar_homo = np.hstack([lidar_points_compensated, np.ones((len(lidar_points_compensated), 1))])
             points_world_final = (T_GI @ lidar_imu_extrinsic @ lidar_homo.T).T[:, :3]
 
+            self.last_lidar_time = time.monotonic()
             return points_world_final, self.last_lidar_update_applied, P_new
 
         return None, False, P_copy
