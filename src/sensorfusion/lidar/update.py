@@ -270,8 +270,14 @@ def lidar_thread(state_lock, buffer_lock, filter, map, imu_measurement_buffer,
                         if last_committed_time is not None and last_committed_pos is not None:
                             dt_scan = scan_timestamp - last_committed_time
                             if 0.08 <= dt_scan <= 1.5:
-                                disp = np.linalg.norm(filter.state.p[:2] - last_committed_pos[:2])
-                                if disp < 0.04:  # Under 4cm displacement over scan interval is noise, not real velocity
+                                disp = float(np.linalg.norm(filter.state.p[:2] - last_committed_pos[:2]))
+                                is_turning = (gyro_max is not None and gyro_max > 0.20)
+                                is_jump = (disp > 0.25)
+                                if is_turning or is_jump:
+                                    # Suppress false linear velocity synthesis during active angular turns
+                                    # (gyro > 0.20 rad/s / ~11.5 deg/s) or discontinuous ICP jumps (> 0.25m per scan)
+                                    v_obs = np.zeros(3)
+                                elif disp < 0.04:  # Under 4cm displacement over scan interval is noise, not real velocity
                                     v_obs = np.zeros(3)
                                 else:
                                     v_obs = (filter.state.p - last_committed_pos) / dt_scan
@@ -296,7 +302,7 @@ def lidar_thread(state_lock, buffer_lock, filter, map, imu_measurement_buffer,
                         else:
                             delta_v = np.zeros(3)
 
-                    last_committed_pos = state.p.copy()
+                    last_committed_pos = filter.state.p.copy()
                     last_committed_time = scan_timestamp
 
                     filter.state.R = filter.state.R @ delta_R

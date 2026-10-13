@@ -398,17 +398,20 @@ class ESIKFStateEstimator:
                 dx[15:18] = 0.0
 
                 max_rotation_correction = np.deg2rad(25.0)
-                max_position_correction = 0.08 if getattr(self, 'is_static', False) else 0.80  # Plausible correction bound; 0.08 when static prevents jumping to ghost walls
+                max_position_correction = 0.08 if getattr(self, 'is_static', False) else 0.25  # Plausible correction bound: 0.08m static, 0.25m dynamic (~0.7m/s limit; blocks wall-sliding)
+                cum_pos = float(np.linalg.norm((state.p + dx[3:6])[:2] - state_0.p[:2]))
                 if (
                     not np.all(np.isfinite(dx))
                     or np.linalg.norm(dx[0:3]) > max_rotation_correction
                     or np.linalg.norm(dx[3:6]) > max_position_correction
+                    or cum_pos > max_position_correction
                 ):
                     if DEBUG_LIDAR:
                         print(
                             "Rejecting implausible correction: "
                             f"rotation={np.linalg.norm(dx[0:3]):.3f} "
-                            f"position={np.linalg.norm(dx[3:6]):.3f}"
+                            f"position={np.linalg.norm(dx[3:6]):.3f} "
+                            f"cumulative={cum_pos:.3f}"
                         )
                     correction_applied = False
                     break
