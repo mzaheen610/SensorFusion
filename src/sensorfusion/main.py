@@ -241,11 +241,21 @@ if __name__ == "__main__":
 
     prev_time = time.monotonic()
 
-    while(True):
-        now = time.monotonic()
-        if now - prev_time >= 1:
-            prev_time = now
-            with state_lock:
-                state = filter.state
-                print("Current state (x,y,z): ", state.p)
-        time.sleep(0.05) #DO NOT REMOVE THIS
+    try:
+        while True:
+            now = time.monotonic()
+            if now - prev_time >= 1:
+                prev_time = now
+                with state_lock:
+                    state = filter.state
+                    print("Current state (x,y,z): ", state.p)
+            time.sleep(0.05) #DO NOT REMOVE THIS
+    except KeyboardInterrupt:
+        print("\n[Main] Keyboard interrupt (Ctrl+C) received. Stopping LiDAR motor and exiting...", flush=True)
+    finally:
+        if lidar_acquisition_worker.is_alive():
+            lidar_acquisition_worker.join(timeout=3.0)
+            if lidar_acquisition_worker.is_alive():
+                lidar_acquisition_worker.terminate()
+                lidar_acquisition_worker.join(timeout=1.0)
+        print("[Main] Pipeline terminated cleanly.", flush=True)

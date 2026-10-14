@@ -69,19 +69,45 @@ def lidar_acquisition_thread(lidar, scan_queue, camera_scan_queue=None):
 
 def lidar_acquisition_process(port, scan_queue, camera_scan_queue=None):
     """Own the serial device in a separate process from fusion work."""
+    import signal
     print("LiDAR acquisition process starting.", flush=True)
+    lidar = None
+
+    def _sig_handler(signum, frame):
+        raise KeyboardInterrupt
+
+    try:
+        signal.signal(signal.SIGINT, _sig_handler)
+        signal.signal(signal.SIGTERM, _sig_handler)
+    except (ValueError, AttributeError):
+        pass
+
     try:
         from initialize import Lidar
 
         lidar = Lidar(port)
         print("LiDAR acquisition process connected.", flush=True)
         lidar_acquisition_thread(lidar, scan_queue, camera_scan_queue)
+    except (KeyboardInterrupt, SystemExit):
+        pass
     except Exception as error:
         print(
             f"LiDAR acquisition process stopped: "
             f"{type(error).__name__}: {error}",
             flush=True,
         )
+    finally:
+        if lidar is not None:
+            print("\n[LiDAR] Stopping motor and disconnecting...", flush=True)
+            try:
+                lidar.stop_motor()
+            except Exception:
+                pass
+            try:
+                lidar.stop()
+            except Exception:
+                pass
+            print("[LiDAR] Motor stopped cleanly.", flush=True)
 
 
 def lidar_thread(state_lock, buffer_lock, filter, map, imu_measurement_buffer,

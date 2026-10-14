@@ -173,6 +173,18 @@ class Lidar:
                 print(f"Error during LiDAR teardown ({step.__name__}): "
                       f"{type(e).__name__}: {e}")
 
+    def stop_motor(self):
+        """Stop motor and pause data stream without closing serial port."""
+        for step in (self.lidar.stop, self.lidar.stop_motor):
+            try:
+                step()
+            except Exception:
+                pass
+
+    def stop(self):
+        """Full clean teardown: stop scan, stop motor, reset, and disconnect serial."""
+        self._close_lidar()
+
     def _reopen_lidar(self):
         self._close_lidar()
 
