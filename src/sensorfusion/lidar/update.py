@@ -212,30 +212,31 @@ def lidar_thread(state_lock, buffer_lock, filter, map, imu_measurement_buffer,
 
                 # --- ZUPT and motion detection check  ---
                 current_bins = scan_to_bins(scan)
+                is_imu_static = False
+                gyro_max = 0.0
+                accel_var = 0.0
+                recent_imu = []
+                sim = None
+
+                if imu_buffer:
+                    recent_imu = [
+                        m for m in imu_buffer
+                        if scan_timestamp - 0.30 <= m[0] <= scan_timestamp + 0.05
+                    ]
+                    if len(recent_imu) < 3:
+                        recent_imu = imu_buffer[-10:]
+                    if len(recent_imu) >= 3:
+                        gyros = np.array([m[1] for m in recent_imu])
+                        accels = np.array([m[2] for m in recent_imu])
+                        gyro_max = float(np.max(np.linalg.norm(gyros, axis=1)))
+                        accel_var = float(np.var(np.linalg.norm(accels, axis=1)))
+                        # Static only if angular speed <= 0.12 rad/s and accel variance <= 0.30
+                        if gyro_max <= 0.12 and accel_var <= 0.30:
+                            is_imu_static = True
+
                 if prev_scan_bins is not None:
                     sim = scan_similarity(current_bins, prev_scan_bins)
                     print("Scan similarity between scans is:", sim)
-
-                    # IMU motion check over the scan interval (recent samples)
-                    is_imu_static = False
-                    gyro_max = 0.0
-                    accel_var = 0.0
-                    recent_imu = []
-                    if imu_buffer:
-                        recent_imu = [
-                            m for m in imu_buffer
-                            if scan_timestamp - 0.30 <= m[0] <= scan_timestamp + 0.05
-                        ]
-                        if len(recent_imu) < 3:
-                            recent_imu = imu_buffer[-10:]
-                        if len(recent_imu) >= 3:
-                            gyros = np.array([m[1] for m in recent_imu])
-                            accels = np.array([m[2] for m in recent_imu])
-                            gyro_max = float(np.max(np.linalg.norm(gyros, axis=1)))
-                            accel_var = float(np.var(np.linalg.norm(accels, axis=1)))
-                            # Static only if angular speed <= 0.12 rad/s and accel variance <= 0.30
-                            if gyro_max <= 0.12 and accel_var <= 0.30:
-                                is_imu_static = True
 
                     # Multi-modal stationary check:
                     # LiDAR motion: sim is median bin difference in mm (resting baseline is 1-15 mm).
@@ -280,9 +281,9 @@ def lidar_thread(state_lock, buffer_lock, filter, map, imu_measurement_buffer,
                     delta_R = state_old.R.T @ state.R
                     if is_platform_static:
                         disp_static = float(np.linalg.norm(delta_p[:2]))
-                        # Allow legitimate ESIKF position corrections up to 0.15m while guarding against gross multi-meter teleportations
-                        if disp_static > 0.15:
-                            delta_p[:2] = (delta_p[:2] / disp_static) * 0.15
+                        # Clamp single-scan displacement strictly to 0.03m (3cm) when platform is static to prevent map smearing / runaway
+                        if disp_static > 0.03:
+                            delta_p[:2] = (delta_p[:2] / disp_static) * 0.03
                         filter.state.v = np.zeros(3)
                         delta_v = np.zeros(3)
                     filter.state.p += delta_p
@@ -357,11 +358,10 @@ def lidar_thread(state_lock, buffer_lock, filter, map, imu_measurement_buffer,
                             f"det_R={np.linalg.det(filter.state.R):.12f}",
                             flush=True,
                         )
-                # Add points if translating without heavy rotation, OR if static but map is sparse (< 40 associations) to avoid map starvation
+                # Only add points if translating without heavy rotation. Never add points while static to prevent ghost wall feedback loops
                 is_turning = (gyro_max is not None and gyro_max > 0.20)
-                is_sparse = getattr(filter, 'last_lidar_association_count', 100) < 40
-                if points_world is not None and update_applied:
-                    if (not is_platform_static and not is_turning and (last_map_pos is None or np.linalg.norm(filter.state.p[:2] - last_map_pos[:2]) > 0.10)) or (is_platform_static and is_sparse):
+                if points_world is not None and update_applied and not is_platform_static and not is_turning:
+                    if last_map_pos is None or np.linalg.norm(filter.state.p[:2] - last_map_pos[:2]) > 0.10:
                         map.add_points(points_world)
                         last_map_pos = filter.state.p.copy()
 
