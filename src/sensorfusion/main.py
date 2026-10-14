@@ -203,6 +203,7 @@ if __name__ == "__main__":
     # Clean zero-point initialization before launching workers
     filter.state.p = np.zeros(3)
     filter.state.v = np.zeros(3)
+    filter.is_static = True
     with buffer_lock:
         trajectory_buffer.clear()
         trajectory_buffer.append(np.zeros(3))

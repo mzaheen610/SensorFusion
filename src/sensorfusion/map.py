@@ -61,9 +61,11 @@ class Map:
                     voxel["color"].append(np.array([128.0, 128.0, 128.0]))  # placeholder gray
                     voxel["image"].append(None)  #store image patch per point
 
-    def query(self, point, min_points_in_voxel=10, radius_voxels=1):
+    def query(self, point, min_points_in_voxel=10, radius_voxels=1, max_correspondence_distance=None):
         # Find neighbors from the current voxel first.
         # Expand to adjacent voxels only when the current voxel is sparse.
+        if max_correspondence_distance is None:
+            max_correspondence_distance = (radius_voxels + 0.5) * self.voxel_size
         with self.lock:
             key = self.get_voxel_key(point)
             voxel = self.voxel_map.get(key, None)
@@ -76,10 +78,14 @@ class Map:
             if len(current_points) >= min_points_in_voxel:
                 neighbors = np.asarray(current_points)
                 distances = np.linalg.norm(neighbors - np.asarray(point), axis=1)
+                valid = distances <= max_correspondence_distance
+                if not np.any(valid):
+                    return None
+                neighbors = neighbors[valid]
+                distances = distances[valid]
                 return neighbors[np.argsort(distances)[:min_points_in_voxel * 2]]
 
-            neighbors = list(current_points)
-            stop_search = False
+            all_candidates = list(current_points)
             for dx in range(-radius_voxels, radius_voxels + 1):
                 for dy in range(-radius_voxels, radius_voxels + 1):
                     for dz in range(-radius_voxels, radius_voxels + 1):
@@ -88,21 +94,19 @@ class Map:
                         nkey = (key[0] + dx, key[1] + dy, key[2] + dz)
                         nvoxel = self.voxel_map.get(nkey, None)
                         if nvoxel is not None and nvoxel["lidar"]:
-                            neighbors.extend(nvoxel["lidar"])
-                            if len(neighbors) >= min_points_in_voxel * 2:
-                                stop_search = True
-                                break  # stop early once we have enough points
-                    if stop_search:
-                        break
-                if stop_search:
-                    break
+                            all_candidates.extend(nvoxel["lidar"])
 
-        if len(neighbors) == 0:
+        if len(all_candidates) == 0:
             return None
 
-        neighbors = np.asarray(neighbors)
-        distances = np.linalg.norm(neighbors - np.asarray(point), axis=1)
-        return neighbors[np.argsort(distances)[:min_points_in_voxel * 2]]
+        all_candidates = np.asarray(all_candidates)
+        distances = np.linalg.norm(all_candidates - np.asarray(point), axis=1)
+        valid = distances <= max_correspondence_distance
+        if not np.any(valid):
+            return None
+        valid_candidates = all_candidates[valid]
+        valid_distances = distances[valid]
+        return valid_candidates[np.argsort(valid_distances)[:min_points_in_voxel * 2]]
     
     def get_voxel_key(self, point):
         # get the root voxel key since the voxel is 0.5x0.5x0.5 cube and multiple points could belong to the same voxel

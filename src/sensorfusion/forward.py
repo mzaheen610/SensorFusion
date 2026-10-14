@@ -100,10 +100,6 @@ class ESIKFStateEstimator:
         ang_norm = float(np.linalg.norm(ang_act))
         accel = (x_prev.R @ (u[1] - x_prev.ba) - x_prev.g)
 
-        delta_theta = ang_act * dt
-        delta_R = exp(delta_theta)
-        self.state.R = self.state.R @ delta_R  #del_theta = w*del_t --> converted to proper SO(3) before adding to the rotation matrix(SO(3))
-        self.state.R = reorthonormalize(self.state.R) # prevent det(R) runaway
         if getattr(self, 'is_static', False):
             # Windowed mean of horizontal acceleration vector to filter out zero-mean motor vibration oscillations.
             # Filtering the vector before taking the norm avoids rectifying high-frequency vibration into false DC acceleration.
@@ -113,15 +109,23 @@ class ESIKFStateEstimator:
             accel_ema_norm = float(np.linalg.norm(self._static_accel_ema_vec))
             self._static_accel_ema = accel_ema_norm
 
-
             # Exit static only on sustained turn (|w| > 0.20) or sustained directional horizontal acceleration (|a_xy| > 0.20)
             if ang_norm > 0.20 or accel_ema_norm > 0.20:
                 self.is_static = False
                 self._static_accel_ema_vec = np.zeros(2)
                 self._static_accel_ema = 0.0
+                delta_theta = ang_act * dt
+                delta_R = exp(delta_theta)
+                self.state.R = self.state.R @ delta_R
+                self.state.R = reorthonormalize(self.state.R)
             else:
                 self.state.v[:] = 0.0
                 self.state.p[2] = 0.0
+        else:
+            delta_theta = ang_act * dt
+            delta_R = exp(delta_theta)
+            self.state.R = self.state.R @ delta_R  #del_theta = w*del_t --> converted to proper SO(3) before adding to the rotation matrix(SO(3))
+            self.state.R = reorthonormalize(self.state.R) # prevent det(R) runaway
 
         if not getattr(self, 'is_static', False):
             self.state.p += (self.state.v * dt) + (0.5 * accel * dt * dt) 

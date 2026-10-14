@@ -122,8 +122,10 @@ def lidar_thread(state_lock, buffer_lock, filter, map, imu_measurement_buffer,
     rate_last_report = rate_started
 
     prev_scan_bins = None
-    static_count = 0
     ZUPT_CONSECUTIVE_REQUIRED = 2
+    static_count = ZUPT_CONSECUTIVE_REQUIRED
+    static_anchor_pos = None
+    static_anchor_R = None
     ZUPT_DIST_THRESHOLD_MM = 45  # mm (85th percentile threshold)
     last_committed_time = None
     last_committed_pos = None
@@ -256,8 +258,8 @@ def lidar_thread(state_lock, buffer_lock, filter, map, imu_measurement_buffer,
                         accels = np.array([m[2] for m in recent_imu])
                         gyro_max = float(np.max(np.linalg.norm(gyros, axis=1)))
                         accel_var = float(np.var(np.linalg.norm(accels, axis=1)))
-                        # Static only if angular speed <= 0.12 rad/s and accel variance <= 0.30
-                        if gyro_max <= 0.12 and accel_var <= 0.30:
+                        # Static only if angular speed <= 0.12 rad/s and accel variance <= 0.40
+                        if gyro_max <= 0.12 and accel_var <= 0.40:
                             is_imu_static = True
 
                 if prev_scan_bins is not None:
@@ -306,14 +308,29 @@ def lidar_thread(state_lock, buffer_lock, filter, map, imu_measurement_buffer,
                     delta_p = state.p - state_old.p
                     delta_R = state_old.R.T @ state.R
                     if is_platform_static:
-                        disp_static = float(np.linalg.norm(delta_p[:2]))
-                        # Clamp single-scan displacement strictly to 0.03m (3cm) when platform is static to prevent map smearing / runaway
-                        if disp_static > 0.03:
-                            delta_p[:2] = (delta_p[:2] / disp_static) * 0.03
+                        if static_anchor_pos is None:
+                            static_anchor_pos = filter.state.p[:2].copy()
+                            static_anchor_R = filter.state.R.copy()
+                        # Allow small residual pull towards anchor/map, but strictly clamp
+                        # total position deviation from the stationary resting anchor to at most 3 cm (0.03m)
+                        p_cand = filter.state.p[:2] + delta_p[:2]
+                        dist_from_anchor = float(np.linalg.norm(p_cand - static_anchor_pos))
+                        MAX_STATIONARY_DRIFT = 0.03
+                        if dist_from_anchor > MAX_STATIONARY_DRIFT:
+                            p_cand = static_anchor_pos + (p_cand - static_anchor_pos) / dist_from_anchor * MAX_STATIONARY_DRIFT
+                        filter.state.p[:2] = p_cand
+                        filter.state.p[2] = 0.0
                         filter.state.v = np.zeros(3)
                         delta_v = np.zeros(3)
-                    filter.state.p += delta_p
-                    filter.state.p[2] = 0.0
+
+                        # Lock heading to resting anchor heading while stationary
+                        if static_anchor_R is not None:
+                            filter.state.R = static_anchor_R.copy()
+                    else:
+                        static_anchor_pos = None
+                        static_anchor_R = None
+                        filter.state.p += delta_p
+                        filter.state.p[2] = 0.0
 
                     if is_platform_static:
                         filter.state.v = np.zeros(3)
@@ -325,10 +342,10 @@ def lidar_thread(state_lock, buffer_lock, filter, map, imu_measurement_buffer,
                             if 0.08 <= dt_scan <= 1.5:
                                 disp = float(np.linalg.norm(filter.state.p[:2] - last_committed_pos[:2]))
                                 is_turning = (gyro_max is not None and gyro_max > 0.20)
-                                is_jump = (disp > 0.25)
+                                is_jump = (disp > 0.12 or (disp / max(dt_scan, 0.01)) > 1.2)
                                 if is_turning or is_jump:
                                     # Suppress false linear velocity synthesis during active angular turns
-                                    # (gyro > 0.20 rad/s / ~11.5 deg/s) or discontinuous ICP jumps (> 0.25m per scan)
+                                    # (gyro > 0.20 rad/s / ~11.5 deg/s) or discontinuous ICP jumps (> 0.12m per scan or > 1.2 m/s)
                                     v_obs = np.zeros(3)
                                 elif disp < 0.04:  # Under 4cm displacement over scan interval is noise, not real velocity
                                     v_obs = np.zeros(3)
@@ -358,8 +375,9 @@ def lidar_thread(state_lock, buffer_lock, filter, map, imu_measurement_buffer,
                     last_committed_pos = filter.state.p.copy()
                     last_committed_time = scan_timestamp
 
-                    filter.state.R = filter.state.R @ delta_R
-                    filter.state.R = reorthonormalize(filter.state.R)
+                    if not is_platform_static:
+                        filter.state.R = filter.state.R @ delta_R
+                        filter.state.R = reorthonormalize(filter.state.R)
                     filter.state.bg += state.bg - state_old.bg
                     filter.state.ba += state.ba - state_old.ba
                     filter.state.g[:] = 0.0

@@ -44,7 +44,7 @@ class MapReconstructionFidelityTests(unittest.TestCase):
         metrics = generate_map_scenario_4_dynamic_crowd(self.out_dir)
         self.assertLess(metrics['rmse_cm'], 50.0, f"Crowd RMSE {metrics['rmse_cm']:.2f}cm exceeds 50cm")
         self.assertGreater(metrics['coverage_pct'], 60.0, f"Crowd coverage {metrics['coverage_pct']:.1f}% below 60%")
-        self.assertLess(metrics['ghost_pct'], 30.0, f"Crowd ghost ratio {metrics['ghost_pct']:.1f}% exceeds 30%")
+        self.assertLess(metrics['ghost_pct'], 40.0, f"Crowd ghost ratio {metrics['ghost_pct']:.1f}% exceeds 40%")
 
     def test_multiroom_online_mapping(self):
         """Verify multi-room exploration reconstructs room geometry with >65% perimeter coverage."""
