@@ -346,9 +346,11 @@ class ESIKFStateEstimator:
                     ])
                     # Compute a dynamic residual gate based on pose uncertainty
                     innovation_var = float(H_k @ P_copy @ H_k.T + sigma_k**2)
+                    # Dynamic residual gate tightly bounded between 0.15m and 0.25m (matching FAST-LIO2 criteria)
+                    # Prevents mismatched perpendicular or cross-room walls during turns from corrupting pose.
                     k = 4
-                    min_gate = 1.20 if search_radius >= 2 else 0.80
-                    gate = max(min_gate, k * np.sqrt(max(1e-9, innovation_var)))   # Wide enough to pull back drifted poses without rejection
+                    k_sigma = float(k * np.sqrt(max(1e-9, innovation_var)))
+                    gate = float(np.clip(k_sigma, 0.15, 0.25))
                     if DEBUG_LIDAR:
                         print("Residual gate value:", gate)
                     if abs(res) > gate:
