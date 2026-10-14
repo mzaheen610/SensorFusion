@@ -28,6 +28,8 @@ logs/
 outputs/
 map_output.png
 final_map.png
+experiments/continuous_streams_data/
+experiments/generated_maps/
 
 # Local hardware/runtime scratch files
 *.pid

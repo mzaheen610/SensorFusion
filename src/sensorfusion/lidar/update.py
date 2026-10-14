@@ -258,15 +258,17 @@ def lidar_thread(state_lock, buffer_lock, filter, map, imu_measurement_buffer,
                 is_platform_static = (static_count >= ZUPT_CONSECUTIVE_REQUIRED)
                 filter.is_static = is_platform_static
 
-                # Adapt residual biases only when stably stationary for a sustained dwell time (static_count >= 10, ~0.7s)
-                # with very quiet IMU variance to ensure braking/settling transients have completely decayed.
+                # Adapt residual biases only when confirmed stationary for a sustained dwell time (static_count >= 10, ~0.7s)
+                # using mean gyro over window (not noisy peak max_gyro), strict LiDAR scan similarity, and tight slew rate limits.
                 if is_platform_static and static_count >= 10 and len(recent_imu) >= 5:
-                    if gyro_max < 0.06 and accel_var < 0.08:
-                        mean_accel = np.mean([m[2] for m in recent_imu], axis=0)
-                        mean_gyro = np.mean([m[1] for m in recent_imu], axis=0)
-                        # Clamped, gentle learning rate (max delta 0.005 m/s^2 accel, 0.002 rad/s gyro per scan)
-                        step_ba = np.clip(0.01 * (mean_accel - filter.state.ba), -0.005, 0.005)
-                        step_bg = np.clip(0.01 * (mean_gyro - filter.state.bg), -0.002, 0.002)
+                    mean_accel = np.mean([m[2] for m in recent_imu], axis=0)
+                    mean_gyro = np.mean([m[1] for m in recent_imu], axis=0)
+                    mean_gyro_norm = float(np.linalg.norm(mean_gyro))
+                    # Strict validation: LiDAR stillness confirms zero motion (sim < 25mm), vibration is quiet (accel_var < 0.08),
+                    # and mean rotation is small (< 0.08 rad/s, ~4.6 deg/s) ensuring slow real turns are never learned as bias.
+                    if (sim is None or sim < 25.0) and accel_var < 0.08 and mean_gyro_norm < 0.08:
+                        step_ba = np.clip(0.01 * (mean_accel - filter.state.ba), -0.003, 0.003)
+                        step_bg = np.clip(0.01 * (mean_gyro - filter.state.bg), -0.001, 0.001)
                         filter.state.ba += step_ba
                         filter.state.bg += step_bg
 
@@ -278,8 +280,9 @@ def lidar_thread(state_lock, buffer_lock, filter, map, imu_measurement_buffer,
                     delta_R = state_old.R.T @ state.R
                     if is_platform_static:
                         disp_static = float(np.linalg.norm(delta_p[:2]))
-                        if disp_static > 0.03:
-                            delta_p[:2] = (delta_p[:2] / disp_static) * 0.03
+                        # Allow legitimate ESIKF position corrections up to 0.15m while guarding against gross multi-meter teleportations
+                        if disp_static > 0.15:
+                            delta_p[:2] = (delta_p[:2] / disp_static) * 0.15
                         filter.state.v = np.zeros(3)
                         delta_v = np.zeros(3)
                     filter.state.p += delta_p
@@ -354,9 +357,11 @@ def lidar_thread(state_lock, buffer_lock, filter, map, imu_measurement_buffer,
                             f"det_R={np.linalg.det(filter.state.R):.12f}",
                             flush=True,
                         )
-                # Only add points if the robot has moved at least 0.10m from the last map commit
-                if points_world is not None and update_applied and not is_platform_static:
-                    if last_map_pos is None or np.linalg.norm(filter.state.p[:2] - last_map_pos[:2]) > 0.10:
+                # Add points if translating without heavy rotation, OR if static but map is sparse (< 40 associations) to avoid map starvation
+                is_turning = (gyro_max is not None and gyro_max > 0.20)
+                is_sparse = getattr(filter, 'last_lidar_association_count', 100) < 40
+                if points_world is not None and update_applied:
+                    if (not is_platform_static and not is_turning and (last_map_pos is None or np.linalg.norm(filter.state.p[:2] - last_map_pos[:2]) > 0.10)) or (is_platform_static and is_sparse):
                         map.add_points(points_world)
                         last_map_pos = filter.state.p.copy()
 

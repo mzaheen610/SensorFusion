@@ -97,6 +97,7 @@ class ESIKFStateEstimator:
 
         # Implement the prediction step of the Kalman filter here
         ang_act = u[0] - x_prev.bg #wm = wa + bg + ng -> wa = wm - bg - ng
+        ang_norm = float(np.linalg.norm(ang_act))
         accel = (x_prev.R @ (u[1] - x_prev.ba) - x_prev.g)
 
         delta_theta = ang_act * dt
@@ -108,10 +109,10 @@ class ESIKFStateEstimator:
             # Filtering the vector before taking the norm avoids rectifying high-frequency vibration into false DC acceleration.
             if not hasattr(self, '_static_accel_ema_vec') or not isinstance(self._static_accel_ema_vec, np.ndarray):
                 self._static_accel_ema_vec = np.zeros(2)
-            ang_norm = float(np.linalg.norm(ang_act))
             self._static_accel_ema_vec = 0.65 * self._static_accel_ema_vec + 0.35 * accel[:2]
             accel_ema_norm = float(np.linalg.norm(self._static_accel_ema_vec))
             self._static_accel_ema = accel_ema_norm
+
 
             # Exit static only on sustained turn (|w| > 0.20) or sustained directional horizontal acceleration (|a_xy| > 0.20)
             if ang_norm > 0.20 or accel_ema_norm > 0.20:
@@ -129,9 +130,12 @@ class ESIKFStateEstimator:
             self.state.v[2] = 0.0  # Zero unobservable vertical velocity
 
             # Physical rolling friction / velocity decay when not actively accelerating
-            # Prevents braking deceleration transients from coasting open-loop indefinitely
-            if np.linalg.norm(accel[:2]) < 0.12:
-                self.state.v[:2] *= max(0.0, 1.0 - 2.0 * dt)
+            # Prevents braking deceleration transients or transient noise spikes from coasting open-loop indefinitely
+            if np.linalg.norm(accel[:2]) < 0.12 and ang_norm < 0.12:
+                self.state.v[:2] *= max(0.0, 1.0 - 6.0 * dt)
+                if np.linalg.norm(self.state.v[:2]) < 0.005:
+                    self.state.v[:2] = 0.0
+
 
             # Safety speed limit for physical platform
             MAX_SPEED = 0.8  # m/s

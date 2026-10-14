@@ -230,23 +230,24 @@ class MotionRecoveryAndWatchdogTests(unittest.TestCase):
         )
         self.assertGreater(est_dyn.last_lidar_association_count, 0, "Dynamic search radius (2 voxels) must include 0.8m offset")
 
-    def test_stationary_lidar_delta_clamped_to_three_centimeters(self):
+    def test_stationary_lidar_delta_clamped_to_fifteen_centimeters(self):
         """
-        When is_platform_static is True, any ICP delta_p must be clamped to at most 3 cm (0.03m),
-        preventing single-scan map smearing or spurious wall jumps.
+        When is_platform_static is True, ICP delta_p is permitted up to the ESIKF's 15 cm gate,
+        preventing single-scan snap-back choking while guarding against gross multi-meter teleportations.
         """
-        # Proposed unconstrained ICP delta of 0.15m:
-        delta_p = np.array([0.15, 0.05, 0.0])
+        # Proposed unconstrained ICP delta of 0.35m:
+        delta_p = np.array([0.35, 0.05, 0.0])
         is_platform_static = True
 
         if is_platform_static:
             disp_static = float(np.linalg.norm(delta_p[:2]))
-            if disp_static > 0.03:
-                delta_p[:2] = (delta_p[:2] / disp_static) * 0.03
+            if disp_static > 0.15:
+                delta_p[:2] = (delta_p[:2] / disp_static) * 0.15
 
-        self.assertAlmostEqual(float(np.linalg.norm(delta_p[:2])), 0.03, places=4)
-        self.assertLessEqual(np.linalg.norm(delta_p[:2]), 0.03001)
+        self.assertAlmostEqual(float(np.linalg.norm(delta_p[:2])), 0.15, places=4)
+        self.assertLessEqual(np.linalg.norm(delta_p[:2]), 0.15001)
 
 
 if __name__ == "__main__":
     unittest.main()
+
