@@ -109,8 +109,8 @@ class ESIKFStateEstimator:
             accel_ema_norm = float(np.linalg.norm(self._static_accel_ema_vec))
             self._static_accel_ema = accel_ema_norm
 
-            # Exit static only on sustained turn (|w| > 0.20) or sustained directional horizontal acceleration (|a_xy| > 0.20)
-            if ang_norm > 0.20 or accel_ema_norm > 0.20:
+            # Exit static on sustained turn (|w| > 0.15) or sustained directional horizontal acceleration (|a_xy| > 0.20)
+            if ang_norm > 0.15 or accel_ema_norm > 0.20:
                 self.is_static = False
                 self._static_accel_ema_vec = np.zeros(2)
                 self._static_accel_ema = 0.0
@@ -133,12 +133,16 @@ class ESIKFStateEstimator:
             self.state.p[2] = 0.0  # Planar robot constraint: 2D motion on ground/table
             self.state.v[2] = 0.0  # Zero unobservable vertical velocity
 
-            # Physical rolling friction / velocity decay when not actively accelerating
-            # Prevents braking deceleration transients or transient noise spikes from coasting open-loop indefinitely
+            # Physical rolling resistance / gentle friction decay when not actively accelerating
+            # Preserves forward momentum between LiDAR scans while smoothly snapping to rest when stopped
             if np.linalg.norm(accel[:2]) < 0.12 and ang_norm < 0.12:
-                self.state.v[:2] *= max(0.0, 1.0 - 6.0 * dt)
-                if np.linalg.norm(self.state.v[:2]) < 0.005:
-                    self.state.v[:2] = 0.0
+                speed_xy = float(np.linalg.norm(self.state.v[:2]))
+                if speed_xy > 0.0:
+                    if speed_xy < 0.03:
+                        self.state.v[:2] = 0.0
+                    else:
+                        friction_decay = min(speed_xy, 0.35 * dt)
+                        self.state.v[:2] -= (self.state.v[:2] / speed_xy) * friction_decay
 
 
             # Safety speed limit for physical platform
@@ -467,12 +471,13 @@ class ESIKFStateEstimator:
                     dx[3:5] = target_cum - (state.p[:2] - state_0.p[:2])
 
                 # Non-Holonomic Constraint (NHC) for wheeled ground robot:
-                # The vehicle cannot slide sideways (body Y displacement <= 0.03m per scan)
+                # The vehicle cannot slide sideways (body Y displacement <= 0.03m per scan straight, <= 0.06m during turns)
                 # and cannot fly vertically (body Z displacement = 0.0).
                 # Transform translation step into the body frame, clamp lateral slip, and transform back.
                 dx_body = state.R.T @ dx[3:6]
-                MAX_BODY_LATERAL_DISP = 0.03
-                dx_body[1] = np.clip(dx_body[1], -MAX_BODY_LATERAL_DISP, MAX_BODY_LATERAL_DISP)
+                is_turning_step = abs(dx[2]) > 0.05 or np.linalg.norm(dx[0:3]) > 0.08
+                max_body_lateral = 0.06 if is_turning_step else 0.03
+                dx_body[1] = np.clip(dx_body[1], -max_body_lateral, max_body_lateral)
                 dx_body[2] = 0.0
                 dx[3:6] = state.R @ dx_body
 

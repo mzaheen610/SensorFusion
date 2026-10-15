@@ -268,10 +268,10 @@ def lidar_thread(state_lock, buffer_lock, filter, map, imu_measurement_buffer,
                     print("Scan similarity between scans is:", sim)
 
                     # Multi-modal stationary check:
-                    # LiDAR motion: sim is median bin difference in mm (resting baseline is 1-15 mm).
-                    # If sim >= 35.0 mm, geometric scan displacement occurred -> platform is moving,
-                    # even if smooth motion didn't trip high IMU rotational or variance thresholds.
-                    is_lidar_static = (sim is None or sim < 35.0)
+                    # LiDAR motion: sim is median bin difference in mm (resting baseline is 1-10 mm).
+                    # If sim >= 20.0 mm, geometric scan displacement occurred -> platform is moving,
+                    # releasing stationary mode promptly without dragging on the resting anchor.
+                    is_lidar_static = (sim is None or sim < 20.0)
                     is_static_sample = is_lidar_static and is_imu_static
 
                     print(
@@ -342,13 +342,11 @@ def lidar_thread(state_lock, buffer_lock, filter, map, imu_measurement_buffer,
                             dt_scan = scan_timestamp - last_committed_time
                             if 0.08 <= dt_scan <= 1.5:
                                 disp = float(np.linalg.norm(filter.state.p[:2] - last_committed_pos[:2]))
-                                is_turning = (gyro_max is not None and gyro_max > 0.20)
                                 is_jump = (disp > 0.12 or (disp / max(dt_scan, 0.01)) > 1.2)
-                                if is_turning or is_jump:
-                                    # Suppress false linear velocity synthesis during active angular turns
-                                    # (gyro > 0.20 rad/s / ~11.5 deg/s) or discontinuous ICP jumps (> 0.12m per scan or > 1.2 m/s)
+                                if is_jump:
+                                    # Suppress false linear velocity synthesis on discontinuous ICP jumps (> 0.12m per scan or > 1.2 m/s)
                                     v_obs = np.zeros(3)
-                                elif disp < 0.04:  # Under 4cm displacement over scan interval is noise, not real velocity
+                                elif disp < 0.03:  # Under 3cm displacement over scan interval is noise, not real velocity
                                     v_obs = np.zeros(3)
                                 else:
                                     v_obs = (filter.state.p - last_committed_pos) / dt_scan
@@ -356,7 +354,8 @@ def lidar_thread(state_lock, buffer_lock, filter, map, imu_measurement_buffer,
 
                                 # Non-Holonomic Constraint (NHC):
                                 # Ground wheeled platform cannot slide laterally.
-                                # Project observed velocity onto body frame and zero out lateral and vertical velocity.
+                                # Project observed velocity onto body frame and zero out lateral and vertical velocity,
+                                # while preserving forward linear velocity along vehicle heading even during turns.
                                 v_obs_body = filter.state.R.T @ v_obs
                                 v_obs_body[1] = 0.0
                                 v_obs_body[2] = 0.0
@@ -416,7 +415,7 @@ def lidar_thread(state_lock, buffer_lock, filter, map, imu_measurement_buffer,
                 is_turning = (gyro_max is not None and gyro_max > 0.20)
                 if is_turning:
                     last_turn_time = time.monotonic()
-                turn_settled = (time.monotonic() - last_turn_time >= 0.5)
+                turn_settled = (time.monotonic() - last_turn_time >= 0.15)
                 if points_world is not None and update_applied and not is_platform_static and not is_turning and turn_settled:
                     if last_map_pos is None or np.linalg.norm(filter.state.p[:2] - last_map_pos[:2]) > 0.10:
                         map.add_points(points_world)
