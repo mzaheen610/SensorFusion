@@ -346,11 +346,9 @@ class ESIKFStateEstimator:
                     ])
                     # Compute a dynamic residual gate based on pose uncertainty
                     innovation_var = float(H_k @ P_copy @ H_k.T + sigma_k**2)
-                    # Dynamic residual gate tightly bounded between 0.15m and 0.25m (matching FAST-LIO2 criteria)
-                    # Prevents mismatched perpendicular or cross-room walls during turns from corrupting pose.
                     k = 4
-                    k_sigma = float(k * np.sqrt(max(1e-9, innovation_var)))
-                    gate = float(np.clip(k_sigma, 0.15, 0.25))
+                    min_gate = 0.80 if search_radius >= 2 else 0.40
+                    gate = max(min_gate, k * np.sqrt(max(1e-9, innovation_var)))
                     if DEBUG_LIDAR:
                         print("Residual gate value:", gate)
                     if abs(res) > gate:
@@ -467,6 +465,16 @@ class ESIKFStateEstimator:
                     dir_cum = (state.p + dx[3:6])[:2] - state_0.p[:2]
                     target_cum = (dir_cum / cum_pos) * max_position_correction
                     dx[3:5] = target_cum - (state.p[:2] - state_0.p[:2])
+
+                # Non-Holonomic Constraint (NHC) for wheeled ground robot:
+                # The vehicle cannot slide sideways (body Y displacement <= 0.03m per scan)
+                # and cannot fly vertically (body Z displacement = 0.0).
+                # Transform translation step into the body frame, clamp lateral slip, and transform back.
+                dx_body = state.R.T @ dx[3:6]
+                MAX_BODY_LATERAL_DISP = 0.03
+                dx_body[1] = np.clip(dx_body[1], -MAX_BODY_LATERAL_DISP, MAX_BODY_LATERAL_DISP)
+                dx_body[2] = 0.0
+                dx[3:6] = state.R @ dx_body
 
                 theta_rot = dx[0:3]
                 state.R = state.R @ exp(theta_rot)

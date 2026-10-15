@@ -130,6 +130,7 @@ def lidar_thread(state_lock, buffer_lock, filter, map, imu_measurement_buffer,
     last_committed_time = None
     last_committed_pos = None
     last_map_pos = None
+    last_turn_time = 0.0
     while True:
         try:
             try:
@@ -352,6 +353,15 @@ def lidar_thread(state_lock, buffer_lock, filter, map, imu_measurement_buffer,
                                 else:
                                     v_obs = (filter.state.p - last_committed_pos) / dt_scan
                                     v_obs[2] = 0.0
+
+                                # Non-Holonomic Constraint (NHC):
+                                # Ground wheeled platform cannot slide laterally.
+                                # Project observed velocity onto body frame and zero out lateral and vertical velocity.
+                                v_obs_body = filter.state.R.T @ v_obs
+                                v_obs_body[1] = 0.0
+                                v_obs_body[2] = 0.0
+                                v_obs = filter.state.R @ v_obs_body
+
                                 speed_obs = float(np.linalg.norm(v_obs[:2]))
                                 MAX_PLATFORM_SPEED = 0.8
                                 if speed_obs > MAX_PLATFORM_SPEED:
@@ -402,9 +412,12 @@ def lidar_thread(state_lock, buffer_lock, filter, map, imu_measurement_buffer,
                             f"det_R={np.linalg.det(filter.state.R):.12f}",
                             flush=True,
                         )
-                # Only add points if translating without heavy rotation. Never add points while static to prevent ghost wall feedback loops
+                # Only add points if translating without heavy rotation and settled after turns. Never add points while static to prevent ghost wall feedback loops
                 is_turning = (gyro_max is not None and gyro_max > 0.20)
-                if points_world is not None and update_applied and not is_platform_static and not is_turning:
+                if is_turning:
+                    last_turn_time = time.monotonic()
+                turn_settled = (time.monotonic() - last_turn_time >= 0.5)
+                if points_world is not None and update_applied and not is_platform_static and not is_turning and turn_settled:
                     if last_map_pos is None or np.linalg.norm(filter.state.p[:2] - last_map_pos[:2]) > 0.10:
                         map.add_points(points_world)
                         last_map_pos = filter.state.p.copy()
