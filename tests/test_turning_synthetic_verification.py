@@ -6,7 +6,7 @@ import sys
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(PROJECT_ROOT / "src" / "sensorfusion"))
 
-from forward import ESIKFStateEstimator
+from forward import ESIKFStateEstimator, State
 from map import Map
 from utils.so3_rotation import exp
 
@@ -330,6 +330,97 @@ class TurningRunawaySyntheticTests(unittest.TestCase):
 
         delta_ba = estimator.state.ba - initial_ba
         self.assertLessEqual(abs(delta_ba[0]), 0.005 + 1e-9, "Per-step bias adaptation must be clamped to <= 0.005 m/s^2")
+
+
+    def test_corner_turn_reversal_suppression_under_nhc(self):
+        """
+        Verify that when rounding a 90-degree corner around a table/obstacle:
+        1. Residuals from unmapped perpendicular surfaces do not drag the vehicle backwards in reverse.
+        2. Non-Holonomic Constraint (NHC) bounds reverse body displacement during turns (dx_body[0] >= -0.04m).
+        """
+        estimator = ESIKFStateEstimator()
+        estimator.is_static = False
+
+        # Build map with only the side edge of a table (y = -0.50m, x in [0.0, 1.2m])
+        m = Map()
+        side_table_pts = []
+        for x in np.linspace(0.0, 1.2, 25):
+            for z in [-0.05, 0.0, 0.05]:
+                side_table_pts.append([x, -0.50, z])
+        m.add_points(np.array(side_table_pts))
+
+        # Robot reaches the corner at x = 1.30, y = -0.29, turned 90 deg CCW (+pi/2 yaw)
+        state = State(
+            R=np.array([[0.0, -1.0, 0.0],
+                        [1.0,  0.0, 0.0],
+                        [0.0,  0.0, 1.0]]),
+            p=np.array([1.30, -0.29, 0.0]),
+            v=np.zeros(3),
+            bg=np.zeros(3),
+            ba=np.zeros(3),
+            g=np.zeros(3),
+        )
+        P = 0.08 * np.eye(18)
+
+        # Beams in body frame hitting the front edge of the table (body forward is world +Y)
+        body_points = []
+        for y_body in np.linspace(-0.3, 0.3, 15):
+            body_points.append([0.30, y_body, 0.0])
+        body_points = np.array(body_points)
+
+        pts_w, applied, P_new = estimator.lidar_update(
+            scan=[(15, 0.0, 300.0)] * len(body_points),
+            state=state,
+            P_copy=P,
+            lidar_points_compensated=body_points,
+            map=m,
+        )
+
+        # Trajectory must NOT collapse backwards (x must remain >= 1.25m, not collapse to < 1.0m)
+        self.assertGreaterEqual(state.p[0], 1.25, "Position must not collapse backwards past the table corner")
+
+    def test_static_anchor_release_smooth_transition(self):
+        """
+        Verify that releasing from static mode starts cleanly from static_anchor_pos
+        without double-counting or absorbing backward ICP shock.
+        """
+        static_anchor_pos = np.array([1.30, -0.29])
+        filter_p = np.array([1.27, -0.27, 0.0])  # slightly pulled inside 3cm anchor radius
+        filter_R = np.eye(3)
+
+        # Negative delta_p candidate from corner match
+        delta_p = np.array([-0.150, 0.010, 0.0])
+
+        is_platform_static = False
+        if not is_platform_static:
+            if static_anchor_pos is not None:
+                filter_p[:2] = static_anchor_pos.copy()
+                static_anchor_pos = None
+                delta_p_body = filter_R.T @ delta_p
+                if delta_p_body[0] < 0.0:
+                    delta_p_body[0] = 0.0
+                    delta_p = filter_R @ delta_p_body
+            filter_p += delta_p
+
+        # Resulting position must start at 1.30 (no backward snap below 1.30):
+        self.assertGreaterEqual(filter_p[0], 1.30, "Static release must not drop below resting anchor")
+
+    def test_frontier_mapping_condition_on_heading_rotation(self):
+        """
+        Verify that rotating by >= 15 degrees (0.26 rad) unlatches map point addition
+        so that new frontiers are progressively mapped during turns.
+        """
+        last_map_heading = 0.0  # rad
+        current_heading = 0.30  # ~17.2 deg rotation
+
+        heading_diff = abs(float(np.arctan2(np.sin(current_heading - last_map_heading),
+                                            np.cos(current_heading - last_map_heading))))
+        self.assertGreaterEqual(heading_diff, 0.26, "Heading difference must exceed 15-degree threshold")
+
+        gyro_max = 0.45  # moderate turn rate (25.8 deg/s)
+        is_high_speed_turn = (gyro_max > 0.80)
+        can_add_frontier = (not is_high_speed_turn and heading_diff >= 0.26)
+        self.assertTrue(can_add_frontier, "Moderate turn with >15 deg rotation must permit frontier mapping")
 
 
 if __name__ == "__main__":

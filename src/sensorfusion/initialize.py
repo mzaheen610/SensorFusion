@@ -70,7 +70,11 @@ class IMU:
         # accel = self.sensor.acceleration
         linear_accel = self.sensor.linear_acceleration
         if gyro is not None and linear_accel is not None:
-            return np.array(gyro), np.array(linear_accel), now
+            g = np.array(gyro, dtype=float)
+            a = np.array(linear_accel, dtype=float)
+            # Align BNO055 clockwise compass yaw rate to ROS REP-103 right-handed CCW (+Z up) convention
+            g[2] = -g[2]
+            return g, a, now
         time.sleep(0.001)
     
     def initialize_rotation_gyro(self):
@@ -95,7 +99,9 @@ class IMU:
             gravity = self.sensor.gravity
             linear_accel = self.sensor.linear_acceleration #accel with gravity removed onboard the sensor
             if _is_valid_reading(gyro):
-                gyro_data.append(gyro)
+                g = np.array(gyro, dtype=float)
+                g[2] = -g[2]  # Align BNO055 clockwise compass yaw rate to ROS REP-103 CCW
+                gyro_data.append(g)
             if _is_valid_reading(linear_accel):
                 linear_accel_data.append(linear_accel)
             if _is_valid_reading(gravity):

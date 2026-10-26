@@ -1,0 +1,18 @@
+{
+  "dataset_name": "turn_arc_right_fast_2026_10_15_17_10_42",
+  "recorded_at": "2026-10-15T17:10:43.035960",
+  "turn_type": "arc_right_fast",
+  "mock_mode": false,
+  "total_duration_sec": 10.533,
+  "turn_duration_sec": 4.018,
+  "pre_dwell_sec": 3.0,
+  "post_dwell_sec": 3.0,
+  "integrated_yaw_deg": 83.98,
+  "imu_sample_count": 628,
+  "imu_effective_hz": 59.62,
+  "lidar_scan_count": 142,
+  "lidar_point_count": 19603,
+  "lidar_effective_hz": 13.48,
+  "gyro_z_peak_deg_s": 2040.75,
+  "lateral_accel_peak_m_s2": 326.97
+}

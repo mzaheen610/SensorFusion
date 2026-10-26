@@ -52,6 +52,10 @@ def imu_thread(imu, filter_ref):
             # invalid_reading_count += 1
             continue
 
+        # Reject corrupted 0x7FFF / ADC saturation / I2C bus contention spikes (>15 rad/s or >25 m/s^2)
+        if np.linalg.norm(gyro) > 15.0 or np.linalg.norm(accel) > 25.0:
+            continue
+
         with buffer_lock:
             #store the timestamp and imu readings for backpropogation of LiDAR points
             imu_measurement_buffer.append((now, gyro.copy(), accel.copy()))

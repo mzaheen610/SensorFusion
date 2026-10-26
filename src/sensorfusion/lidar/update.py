@@ -130,6 +130,7 @@ def lidar_thread(state_lock, buffer_lock, filter, map, imu_measurement_buffer,
     last_committed_time = None
     last_committed_pos = None
     last_map_pos = None
+    last_map_heading = None
     last_turn_time = 0.0
     while True:
         try:
@@ -328,8 +329,17 @@ def lidar_thread(state_lock, buffer_lock, filter, map, imu_measurement_buffer,
                         if static_anchor_R is not None:
                             filter.state.R = static_anchor_R.copy()
                     else:
-                        static_anchor_pos = None
-                        static_anchor_R = None
+                        if static_anchor_pos is not None:
+                            # Just released from static anchor: reset live pose cleanly to the true anchor
+                            # to wipe any sub-3cm stationary creep that accumulated while resting
+                            filter.state.p[:2] = static_anchor_pos.copy()
+                            static_anchor_pos = None
+                            static_anchor_R = None
+                            # On transition scan, clamp any backward step in body frame
+                            delta_p_body = filter.state.R.T @ delta_p
+                            if delta_p_body[0] < 0.0:
+                                delta_p_body[0] = 0.0
+                                delta_p = filter.state.R @ delta_p_body
                         filter.state.p += delta_p
                         filter.state.p[2] = 0.0
 
@@ -359,6 +369,12 @@ def lidar_thread(state_lock, buffer_lock, filter, map, imu_measurement_buffer,
                                 v_obs_body = filter.state.R.T @ v_obs
                                 v_obs_body[1] = 0.0
                                 v_obs_body[2] = 0.0
+
+                                # Prevent spurious reverse velocity synthesis during turns
+                                is_active_turn = (gyro_max is not None and gyro_max > 0.15)
+                                if is_active_turn and v_obs_body[0] < 0.0:
+                                    v_obs_body[0] = 0.0
+
                                 v_obs = filter.state.R @ v_obs_body
 
                                 speed_obs = float(np.linalg.norm(v_obs[:2]))
@@ -411,15 +427,37 @@ def lidar_thread(state_lock, buffer_lock, filter, map, imu_measurement_buffer,
                             f"det_R={np.linalg.det(filter.state.R):.12f}",
                             flush=True,
                         )
-                # Only add points if translating without heavy rotation and settled after turns. Never add points while static to prevent ghost wall feedback loops
-                is_turning = (gyro_max is not None and gyro_max > 0.20)
-                if is_turning:
+                # Map point ingestion logic:
+                # Add points on forward motion, upon settling from turns, and progressively when rotating into new frontiers.
+                current_heading = float(np.arctan2(filter.state.R[1, 0], filter.state.R[0, 0]))
+                if last_map_heading is None:
+                    heading_diff = 1.0
+                else:
+                    heading_diff = abs(float(np.arctan2(np.sin(current_heading - last_map_heading), np.cos(current_heading - last_map_heading))))
+
+                pos_diff = float(np.linalg.norm(filter.state.p[:2] - last_map_pos[:2])) if last_map_pos is not None else 1.0
+
+                is_high_speed_turn = (gyro_max is not None and gyro_max > 0.80)
+                is_moderate_turn = (gyro_max is not None and gyro_max > 0.20)
+                if is_moderate_turn:
                     last_turn_time = time.monotonic()
                 turn_settled = (time.monotonic() - last_turn_time >= 0.15)
-                if points_world is not None and update_applied and not is_platform_static and not is_turning and turn_settled:
-                    if last_map_pos is None or np.linalg.norm(filter.state.p[:2] - last_map_pos[:2]) > 0.10:
-                        map.add_points(points_world)
-                        last_map_pos = filter.state.p.copy()
+
+                can_add_points = False
+                if points_world is not None and update_applied:
+                    if not is_platform_static and not is_moderate_turn and turn_settled and pos_diff > 0.10:
+                        can_add_points = True
+                    elif not is_high_speed_turn and heading_diff >= 0.26:
+                        # Rotated >= 15 degrees into a new field of view; map frontier points
+                        can_add_points = True
+                    elif is_platform_static and (heading_diff >= 0.26 or (last_map_pos is None or pos_diff > 0.10)):
+                        # Settled at a new heading or position after a maneuver; add one snapshot then quiet
+                        can_add_points = True
+
+                if can_add_points:
+                    map.add_points(points_world)
+                    last_map_pos = filter.state.p.copy()
+                    last_map_heading = current_heading
 
                 if is_platform_static:
                     filter.zupt_update()

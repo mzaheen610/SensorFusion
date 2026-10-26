@@ -19,9 +19,11 @@ Usage:
 """
 
 import argparse
+import copy
 import json
 import math
 import sys
+from collections import deque
 from pathlib import Path
 
 import numpy as np
@@ -31,15 +33,23 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(PROJECT_ROOT / "src" / "sensorfusion"))
 
 try:
-    from forward import ESIKFStateEstimator, State
+    from forward import ESIKFStateEstimator, State, reorthonormalize
     from map import Map
+    from lidar.backward import backprop
+    from utils.similarity import scan_to_bins, scan_similarity
     from utils.so3_rotation import log
     HAS_FUSION = True
 except ImportError:
     HAS_FUSION = False
 
 
-def analyze_dataset(npz_path: str, simulate_fusion: bool = False, save_plot: bool = False):
+def analyze_dataset(
+    npz_path: str,
+    simulate_fusion: bool = False,
+    save_plot: bool = False,
+    invert_gyro_z: bool = False,
+    clean_spikes: bool = False,
+):
     path = Path(npz_path)
     if not path.exists():
         print(f"[ERROR] File not found: {path}")
@@ -54,12 +64,13 @@ def analyze_dataset(npz_path: str, simulate_fusion: bool = False, save_plot: boo
     # Extract arrays
     t_imu = data["imu_t_mono"]
     t_wall = data["imu_t_wall"] if "imu_t_wall" in data else t_imu
-    gyro = data["imu_gyro"]  # (M, 3) in rad/s
-    lin_accel = data["imu_lin_accel"]  # (M, 3) in m/s^2
-    raw_accel = data["imu_raw_accel"]  # (M, 3) in m/s^2
+    gyro = data["imu_gyro"].copy()  # (M, 3) in rad/s
+    lin_accel = data["imu_lin_accel"].copy()  # (M, 3) in m/s^2
+    raw_accel = data["imu_raw_accel"].copy()  # (M, 3) in m/s^2
     t_start_turn = float(data["turn_start_time"])
     t_end_turn = float(data["turn_end_time"])
 
+    t_lidar_start = data["lidar_t_start"] if "lidar_t_start" in data else None
     t_lidar_end = data["lidar_t_end"]
     lidar_points = data["lidar_points"]
     lidar_scan_offsets = data["lidar_scan_offsets"]
@@ -152,7 +163,17 @@ def analyze_dataset(npz_path: str, simulate_fusion: bool = False, save_plot: boo
         if not HAS_FUSION:
             print("  [ERROR] Sensor fusion module could not be imported; skipping replay.")
         else:
-            run_fusion_simulation(t_imu, gyro, lin_accel, t_lidar_end, lidar_points, lidar_scan_offsets)
+            run_fusion_simulation(
+                t_imu,
+                gyro,
+                lin_accel,
+                t_lidar_start,
+                t_lidar_end,
+                lidar_points,
+                lidar_scan_offsets,
+                invert_gyro_z=invert_gyro_z,
+                clean_spikes=clean_spikes,
+            )
 
     # 7. Generate Plot if requested
     if save_plot:
@@ -169,77 +190,271 @@ def analyze_dataset(npz_path: str, simulate_fusion: bool = False, save_plot: boo
         )
 
 
-def run_fusion_simulation(t_imu, gyro, lin_accel, t_lidar_end, lidar_points, lidar_scan_offsets):
-    """Simulate ESIKF state estimator offline over the recorded data."""
+def run_fusion_simulation(
+    t_imu,
+    gyro,
+    lin_accel,
+    t_lidar_start,
+    t_lidar_end,
+    lidar_points,
+    lidar_scan_offsets,
+    invert_gyro_z: bool = False,
+    clean_spikes: bool = False,
+):
+    """Simulate ESIKF state estimator offline over the recorded data with full fidelity."""
+    gyro = gyro.copy()
+    lin_accel = lin_accel.copy()
+
+    if invert_gyro_z:
+        gyro[:, 2] = -gyro[:, 2]
+        print("  [PREPROCESS] Inverted Gyro Z sign to match REP-103 (+Z Up, CCW Left).")
+
+    if clean_spikes:
+        spike_count = 0
+        for idx in range(len(gyro)):
+            if np.linalg.norm(gyro[idx]) > 15.0:
+                gyro[idx] = gyro[max(0, idx - 1)]
+                spike_count += 1
+            if np.linalg.norm(lin_accel[idx]) > 25.0:
+                lin_accel[idx] = lin_accel[max(0, idx - 1)]
+                spike_count += 1
+        if spike_count > 0:
+            print(f"  [PREPROCESS] Filtered {spike_count} corrupted 0x7FFF/saturation spikes.")
+
     estimator = ESIKFStateEstimator()
+    estimator.is_static = True
     m = Map()
 
-    # Build initial map from first 2 scans
-    if len(lidar_scan_offsets) > 2:
-        for s in range(min(2, len(lidar_scan_offsets) - 1)):
-            s_idx = lidar_scan_offsets[s]
-            e_idx = lidar_scan_offsets[s + 1]
-            pts = lidar_points[s_idx:e_idx]
-            ranges = pts[:, 2] / 1000.0
-            angles = np.radians((360.0 - pts[:, 1]) % 360.0)
-            xs = ranges * np.cos(angles)
-            ys = ranges * np.sin(angles)
-            pts_w = np.column_stack([xs, ys, np.zeros_like(xs)])
-            m.add_points(pts_w)
+    imu_meas_buf = deque()
+    imu_state_buf = deque()
 
-    dt_nominal = 0.033
+    num_scans = len(lidar_scan_offsets) - 1
+    scan_cursor = 0
+    static_count = 2
+    static_anchor_pos = None
+    static_anchor_R = None
+    prev_scan_bins = None
+    last_committed_time = None
+    last_committed_pos = None
+    last_map_pos = None
+    last_map_heading = None
+    last_turn_time = 0.0
+
     poses = []
     times = []
+    residuals_hist = []
+    applied_count = 0
+    skipped_count = 0
 
-    scan_cursor = 0
-    num_scans = len(lidar_scan_offsets) - 1
+    # Build initial map from first 2 scans if available
+    for s in range(min(2, num_scans)):
+        s_idx = lidar_scan_offsets[s]
+        e_idx = lidar_scan_offsets[s + 1]
+        raw_pts = lidar_points[s_idx:e_idx]
+        ranges = raw_pts[:, 2] / 1000.0
+        angles = np.radians((360.0 - raw_pts[:, 1]) % 360.0)
+        xs = ranges * np.cos(angles)
+        ys = ranges * np.sin(angles)
+        m.add_points(np.column_stack([xs, ys, np.zeros_like(xs)]))
 
     for i in range(1, len(t_imu)):
-        dt = float(t_imu[i] - t_imu[i - 1])
-        if dt <= 0 or dt > 0.1:
-            dt = dt_nominal
+        now = t_imu[i]
+        dt = float(now - t_imu[i - 1])
+        if dt <= 0.0 or dt > 0.1:
+            dt = 0.0167
 
-        u = (gyro[i], lin_accel[i])
-        estimator.predict(u, dt)
+        g_sample = gyro[i].copy()
+        a_sample = lin_accel[i].copy()
 
-        # Check if a LiDAR scan falls in this interval
-        if scan_cursor < num_scans and t_lidar_end[scan_cursor] <= t_imu[i]:
+        imu_meas_buf.append((now, g_sample.copy(), a_sample.copy()))
+        while imu_meas_buf and now - imu_meas_buf[0][0] > 3.0:
+            imu_meas_buf.popleft()
+
+        # IMU forward prediction
+        state, cov = estimator.predict((g_sample, a_sample), dt)
+        imu_state_buf.append((now, copy.deepcopy(state), copy.deepcopy(cov)))
+        while imu_state_buf and now - imu_state_buf[0][0] > 3.0:
+            imu_state_buf.popleft()
+
+        # Check if a LiDAR scan finishes in this interval
+        while scan_cursor < num_scans and t_lidar_end[scan_cursor] <= now:
+            scan_end = t_lidar_end[scan_cursor]
+            scan_start = t_lidar_start[scan_cursor] if t_lidar_start is not None else scan_end - 0.072
+
             s_idx = lidar_scan_offsets[scan_cursor]
             e_idx = lidar_scan_offsets[scan_cursor + 1]
-            pts = lidar_points[s_idx:e_idx]
-            if len(pts) > 10:
-                ranges = pts[:, 2] / 1000.0
-                angles = np.radians((360.0 - pts[:, 1]) % 360.0)
-                body_pts = np.column_stack([ranges * np.cos(angles), ranges * np.sin(angles), np.zeros_like(ranges)])
-
-                scan_tuples = [(int(p[0]), float(p[1]), float(p[2])) for p in pts]
-                state_copy = State(
-                    R=estimator.state.R.copy(),
-                    p=estimator.state.p.copy(),
-                    v=estimator.state.v.copy(),
-                    bg=estimator.state.bg.copy(),
-                    ba=estimator.state.ba.copy(),
-                    g=estimator.state.g.copy(),
-                )
-                estimator.lidar_update(
-                    scan=scan_tuples,
-                    state=state_copy,
-                    P_copy=estimator.P.copy(),
-                    lidar_points_compensated=body_pts,
-                    map=m,
-                )
+            raw_s = lidar_points[s_idx:e_idx]
+            scan = [(int(p[0]), float(p[1]), float(p[2])) for p in raw_s]
             scan_cursor += 1
 
+            if len(scan) < 10:
+                continue
+
+            # Motion deskewing via IMU backpropagation
+            compensated_points = backprop(scan_end, scan_start, estimator.state, scan, imu_meas_buf)
+            if len(compensated_points) == 0:
+                ranges = raw_s[:, 2] / 1000.0
+                angles = np.radians((360.0 - raw_s[:, 1]) % 360.0)
+                compensated_points = np.column_stack([ranges * np.cos(angles), ranges * np.sin(angles), np.zeros_like(ranges)])
+
+            # ZUPT and multi-modal motion classification
+            current_bins = scan_to_bins(scan)
+            recent_imu = [m_rec for m_rec in imu_meas_buf if scan_end - 0.30 <= m_rec[0] <= scan_end + 0.05]
+            if len(recent_imu) < 3:
+                recent_imu = list(imu_meas_buf)[-10:]
+            gyro_max = 0.0
+            accel_var = 0.0
+            if len(recent_imu) >= 3:
+                gyros = np.array([m_rec[1] for m_rec in recent_imu])
+                accels = np.array([m_rec[2] for m_rec in recent_imu])
+                gyro_max = float(np.max(np.linalg.norm(gyros, axis=1)))
+                accel_var = float(np.sum(np.var(accels, axis=0)))
+
+            is_imu_static = (gyro_max < 0.12 and accel_var < 0.40)
+            sim = None
+            if prev_scan_bins is not None:
+                sim = scan_similarity(prev_scan_bins, current_bins)
+            prev_scan_bins = current_bins
+
+            is_lidar_static = (sim is None or sim < 20.0)
+            is_sample_static = is_imu_static and is_lidar_static
+
+            if is_sample_static:
+                static_count += 1
+            else:
+                static_count = 0
+            is_platform_static = (static_count >= 2)
+            estimator.is_static = is_platform_static
+
+            # ESIKF LiDAR update
+            state_snapshot = copy.deepcopy(estimator.state)
+            state_old = copy.deepcopy(state_snapshot)
+            P_copy = estimator.P.copy()
+
+            pts_world, update_applied, P_new = estimator.lidar_update(
+                scan, state_snapshot, P_copy, compensated_points, m
+            )
+
+            if update_applied:
+                applied_count += 1
+                residuals_hist.append(estimator.last_lidar_residual_norm)
+                delta_p = state_snapshot.p - state_old.p
+                delta_R = state_old.R.T @ state_snapshot.R
+
+                if is_platform_static:
+                    if static_anchor_pos is None:
+                        static_anchor_pos = estimator.state.p[:2].copy()
+                        static_anchor_R = estimator.state.R.copy()
+                    p_cand = estimator.state.p[:2] + delta_p[:2]
+                    dist_from_anchor = float(np.linalg.norm(p_cand - static_anchor_pos))
+                    MAX_STATIONARY_DRIFT = 0.03
+                    if dist_from_anchor > MAX_STATIONARY_DRIFT:
+                        p_cand = static_anchor_pos + (p_cand - static_anchor_pos) / dist_from_anchor * MAX_STATIONARY_DRIFT
+                    estimator.state.p[:2] = p_cand
+                    estimator.state.p[2] = 0.0
+                    estimator.state.v = np.zeros(3)
+                    if static_anchor_R is not None:
+                        estimator.state.R = static_anchor_R.copy()
+                else:
+                    if static_anchor_pos is not None:
+                        estimator.state.p[:2] = static_anchor_pos.copy()
+                        static_anchor_pos = None
+                        static_anchor_R = None
+                        delta_p_body = estimator.state.R.T @ delta_p
+                        if delta_p_body[0] < 0.0:
+                            delta_p_body[0] = 0.0
+                            delta_p = estimator.state.R @ delta_p_body
+                    estimator.state.p += delta_p
+                    estimator.state.p[2] = 0.0
+
+                if is_platform_static:
+                    estimator.state.v = np.zeros(3)
+                else:
+                    # Velocity reconciliation with Non-Holonomic Constraints (NHC)
+                    if last_committed_time is not None and last_committed_pos is not None:
+                        dt_scan = scan_end - last_committed_time
+                        if 0.08 <= dt_scan <= 1.5:
+                            disp = float(np.linalg.norm(estimator.state.p[:2] - last_committed_pos[:2]))
+                            is_jump = (disp > 0.12 or (disp / max(dt_scan, 0.01)) > 1.2)
+                            if is_jump or disp < 0.03:
+                                v_obs = np.zeros(3)
+                            else:
+                                v_obs = (estimator.state.p - last_committed_pos) / dt_scan
+                                v_obs[2] = 0.0
+                            v_obs_body = estimator.state.R.T @ v_obs
+                            v_obs_body[1] = 0.0
+                            v_obs_body[2] = 0.0
+                            is_active_turn = (gyro_max > 0.15)
+                            if is_active_turn and v_obs_body[0] < 0.0:
+                                v_obs_body[0] = 0.0
+                            v_obs = estimator.state.R @ v_obs_body
+                            speed_obs = float(np.linalg.norm(v_obs[:2]))
+                            if speed_obs > 0.8:
+                                v_obs[:2] = (v_obs[:2] / speed_obs) * 0.8
+                            alpha_v = 0.7
+                            estimator.state.v[:2] = (1.0 - alpha_v) * estimator.state.v[:2] + alpha_v * v_obs[:2]
+                            estimator.state.v[2] = 0.0
+
+                last_committed_pos = estimator.state.p.copy()
+                last_committed_time = scan_end
+                if not is_platform_static:
+                    estimator.state.R = estimator.state.R @ delta_R
+                    estimator.state.R = reorthonormalize(estimator.state.R)
+                estimator.P = P_new
+            else:
+                skipped_count += 1
+
+            # Map frontier ingestion and post-turn settling logic
+            current_heading = float(np.arctan2(estimator.state.R[1, 0], estimator.state.R[0, 0]))
+            if last_map_heading is None:
+                heading_diff = 1.0
+            else:
+                heading_diff = abs(float(np.arctan2(np.sin(current_heading - last_map_heading), np.cos(current_heading - last_map_heading))))
+            pos_diff = float(np.linalg.norm(estimator.state.p[:2] - last_map_pos[:2])) if last_map_pos is not None else 1.0
+
+            is_high_speed_turn = (gyro_max > 0.80)
+            is_moderate_turn = (gyro_max > 0.20)
+            if is_moderate_turn:
+                last_turn_time = now
+            turn_settled = (now - last_turn_time >= 0.15)
+
+            can_add_points = False
+            if pts_world is not None and update_applied:
+                if not is_platform_static and not is_moderate_turn and turn_settled and pos_diff > 0.10:
+                    can_add_points = True
+                elif not is_high_speed_turn and heading_diff >= 0.26:
+                    can_add_points = True
+                elif is_platform_static and (heading_diff >= 0.26 or (last_map_pos is None or pos_diff > 0.10)):
+                    can_add_points = True
+
+            if can_add_points:
+                m.add_points(pts_world)
+                last_map_pos = estimator.state.p.copy()
+                last_map_heading = current_heading
+
+            if is_platform_static:
+                estimator.zupt_update()
+                estimator.state.v = np.zeros(3)
+                last_committed_pos = estimator.state.p.copy()
+                last_committed_time = scan_end
+
         poses.append(estimator.state.p.copy())
-        times.append(t_imu[i] - t_imu[0])
+        times.append(now - t_imu[0])
 
     poses = np.array(poses)
     final_p = poses[-1]
-    max_disp = np.max(np.linalg.norm(poses[:, :2], axis=1))
+    final_yaw_deg = float(np.degrees(np.arctan2(estimator.state.R[1, 0], estimator.state.R[0, 0])))
+    max_disp = float(np.max(np.linalg.norm(poses[:, :2], axis=1)))
+    net_disp = float(np.linalg.norm(final_p[:2]))
 
-    print(f"  Simulation completed successfully ({len(poses)} steps).")
+    print(f"  Simulation completed successfully ({len(poses)} IMU steps, {num_scans} LiDAR scans).")
+    print(f"  Scans Applied:            {applied_count}/{num_scans} ({applied_count / max(num_scans, 1) * 100:.1f}%) | Skipped: {skipped_count}")
+    print(f"  Map Points Built:         {m.num_points()} points")
     print(f"  Final Estimated Position: [x={final_p[0]:+.3f}m, y={final_p[1]:+.3f}m]")
-    print(f"  Max Horizontal Excursion: {max_disp:.3f}m")
+    print(f"  Net Trajectory Length:    {net_disp:.3f}m (Max Excursion: {max_disp:.3f}m)")
+    print(f"  Final Estimated Heading:  {final_yaw_deg:+.1f}°")
+    if residuals_hist:
+        print(f"  Residual Norm:            mean={np.mean(residuals_hist):.4f}, median={np.median(residuals_hist):.4f}, max={np.max(residuals_hist):.4f}")
 
 
 def generate_analysis_plot(plot_path, t_rel, t_start_rel, t_end_rel, gyro, lin_accel, yaw_integrated_deg, path_name):
@@ -300,9 +515,17 @@ def main():
     parser.add_argument("npz_file", type=str, help="Path to .npz turn dataset file")
     parser.add_argument("--simulate-fusion", action="store_true", help="Replay data through ESIKFStateEstimator")
     parser.add_argument("--save-plot", action="store_true", help="Generate and save diagnostic kinematic plots")
+    parser.add_argument("--invert-gyro-z", action="store_true", help="Invert Gyro Z sign to align with ROS REP-103 (+Z Up, CCW Left)")
+    parser.add_argument("--clean-spikes", action="store_true", help="Filter BNO055 I2C 0x7FFF / saturation spikes (>25 m/s² or >15 rad/s)")
 
     args = parser.parse_args()
-    analyze_dataset(args.npz_file, simulate_fusion=args.simulate_fusion, save_plot=args.save_plot)
+    analyze_dataset(
+        args.npz_file,
+        simulate_fusion=args.simulate_fusion,
+        save_plot=args.save_plot,
+        invert_gyro_z=args.invert_gyro_z,
+        clean_spikes=args.clean_spikes,
+    )
 
 
 if __name__ == "__main__":

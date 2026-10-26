@@ -65,7 +65,10 @@ class Map:
         # Find neighbors from the current voxel first.
         # Expand to adjacent voxels only when the current voxel is sparse.
         if max_correspondence_distance is None:
-            max_correspondence_distance = (radius_voxels + 0.5) * self.voxel_size
+            if radius_voxels == 1:
+                max_correspondence_distance = min(0.40, (radius_voxels + 0.5) * self.voxel_size)
+            else:
+                max_correspondence_distance = (radius_voxels + 0.5) * self.voxel_size
         with self.lock:
             key = self.get_voxel_key(point)
             voxel = self.voxel_map.get(key, None)

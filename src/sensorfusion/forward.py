@@ -351,8 +351,16 @@ class ESIKFStateEstimator:
                     # Compute a dynamic residual gate based on pose uncertainty
                     innovation_var = float(H_k @ P_copy @ H_k.T + sigma_k**2)
                     k = 4
-                    min_gate = 0.80 if search_radius >= 2 else 0.40
-                    gate = max(min_gate, k * np.sqrt(max(1e-9, innovation_var)))
+                    is_currently_static = getattr(self, 'is_static', False)
+                    if is_currently_static:
+                        # Tight residual gate while stationary: noise floor is small; reject cross-corner false matches
+                        gate = float(np.clip(k * np.sqrt(max(1e-9, innovation_var)), 0.20, 0.40))
+                    else:
+                        # Dynamic gate: allow forward stroke displacements up to 0.70m, but cap at 0.75m
+                        # to prevent runaway gates (up to 4.0m) during turn covariance expansion
+                        min_gate = 0.70 if search_radius >= 2 else 0.35
+                        max_gate = 0.75 if search_radius >= 2 else 0.45
+                        gate = float(np.clip(k * np.sqrt(max(1e-9, innovation_var)), min_gate, max_gate))
                     if DEBUG_LIDAR:
                         print("Residual gate value:", gate)
                     if abs(res) > gate:
@@ -450,7 +458,7 @@ class ESIKFStateEstimator:
                 # Verified clip sized from pose covariance
                 sigma_p = np.sqrt(max(0.0, float(P_copy[3, 3] + P_copy[4, 4])))
                 if getattr(self, 'is_static', False):
-                    max_position_correction = float(np.clip(3.0 * sigma_p, 0.15, 0.40))
+                    max_position_correction = float(np.clip(3.0 * sigma_p, 0.08, 0.15))
                 else:
                     max_position_correction = float(np.clip(3.0 * sigma_p, 0.25, 0.50))
                 max_rotation_correction = np.deg2rad(25.0)
@@ -473,12 +481,16 @@ class ESIKFStateEstimator:
                 # Non-Holonomic Constraint (NHC) for wheeled ground robot:
                 # The vehicle cannot slide sideways (body Y displacement <= 0.03m per scan straight, <= 0.06m during turns)
                 # and cannot fly vertically (body Z displacement = 0.0).
-                # Transform translation step into the body frame, clamp lateral slip, and transform back.
+                # In addition, during active turns, a forward-moving ground platform cannot jump backwards in reverse (body X >= -0.04m).
+                # Transform translation step into the body frame, clamp lateral slip and reverse drag, and transform back.
                 dx_body = state.R.T @ dx[3:6]
                 is_turning_step = abs(dx[2]) > 0.05 or np.linalg.norm(dx[0:3]) > 0.08
                 max_body_lateral = 0.06 if is_turning_step else 0.03
                 dx_body[1] = np.clip(dx_body[1], -max_body_lateral, max_body_lateral)
                 dx_body[2] = 0.0
+                if is_turning_step:
+                    # During turns, prevent ICP corner false matches from pulling the robot backwards in reverse
+                    dx_body[0] = max(-0.04, dx_body[0])
                 dx[3:6] = state.R @ dx_body
 
                 theta_rot = dx[0:3]
