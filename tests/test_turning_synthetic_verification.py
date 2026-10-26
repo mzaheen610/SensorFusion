@@ -379,17 +379,18 @@ class TurningRunawaySyntheticTests(unittest.TestCase):
         # Trajectory must NOT collapse backwards (x must remain >= 1.25m, not collapse to < 1.0m)
         self.assertGreaterEqual(state.p[0], 1.25, "Position must not collapse backwards past the table corner")
 
-    def test_static_anchor_release_smooth_transition(self):
+    def test_static_anchor_release_bidirectional_transition(self):
         """
         Verify that releasing from static mode starts cleanly from static_anchor_pos
-        without double-counting or absorbing backward ICP shock.
+        (wiping sub-3cm stationary creep) and bounds transition steps to plausible physical limits
+        while cleanly supporting legitimate reverse motion.
         """
         static_anchor_pos = np.array([1.30, -0.29])
         filter_p = np.array([1.27, -0.27, 0.0])  # slightly pulled inside 3cm anchor radius
         filter_R = np.eye(3)
 
-        # Negative delta_p candidate from corner match
-        delta_p = np.array([-0.150, 0.010, 0.0])
+        # Negative delta_p from deliberate backward movement
+        delta_p = np.array([-0.100, 0.010, 0.0])
 
         is_platform_static = False
         if not is_platform_static:
@@ -397,13 +398,37 @@ class TurningRunawaySyntheticTests(unittest.TestCase):
                 filter_p[:2] = static_anchor_pos.copy()
                 static_anchor_pos = None
                 delta_p_body = filter_R.T @ delta_p
-                if delta_p_body[0] < 0.0:
-                    delta_p_body[0] = 0.0
-                    delta_p = filter_R @ delta_p_body
+                delta_p_body[0] = np.clip(delta_p_body[0], -0.20, 0.20)
+                delta_p = filter_R @ delta_p_body
             filter_p += delta_p
 
-        # Resulting position must start at 1.30 (no backward snap below 1.30):
-        self.assertGreaterEqual(filter_p[0], 1.30, "Static release must not drop below resting anchor")
+        # Resulting position must start at 1.30 and apply -0.10m reverse step cleanly to 1.20:
+        self.assertAlmostEqual(filter_p[0], 1.20, places=3,
+                               msg="Static release must allow legitimate backward step from resting anchor")
+
+    def test_bidirectional_reverse_velocity_reconciliation(self):
+        """
+        Verify that legitimate backward movement synthesized negative body velocity
+        without being zeroed or inverted by active turn checks.
+        """
+        filter_R = np.eye(3)
+        dt_scan = 0.50
+        p_now = np.array([1.10, 0.0, 0.0])
+        p_prev = np.array([1.20, 0.0, 0.0])  # Robot moved backwards by 10 cm in 0.5s (-0.20 m/s)
+
+        v_obs = (p_now - p_prev) / dt_scan
+        v_obs[2] = 0.0
+
+        v_obs_body = filter_R.T @ v_obs
+        v_obs_body[1] = 0.0
+        v_obs_body[2] = 0.0
+        MAX_REVERSE_SPEED = 0.5
+        if v_obs_body[0] < -MAX_REVERSE_SPEED:
+            v_obs_body[0] = -MAX_REVERSE_SPEED
+        v_obs = filter_R @ v_obs_body
+
+        self.assertAlmostEqual(v_obs[0], -0.20, places=3,
+                               msg="Reverse velocity must be accurately preserved without being zeroed")
 
     def test_frontier_mapping_condition_on_heading_rotation(self):
         """

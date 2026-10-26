@@ -230,6 +230,23 @@ Every threshold in this table was tuned to solve a specific real-world failure o
 
 ---
 
+### Issue 10: Asymmetric Reverse Clamping Converting Backward Pull into Forward Jump
+- **Manifestation (Run `run_2026_10_26_11_51_47.log`)**:
+  When the user physically pulled the platform backwards from rest, the front LiDAR range increased from $3.78\text{ m} \to 3.97\text{ m} \to 4.09\text{ m}$ (+0.31m away). However, the state estimator jumped forward from $X = 0.750\text{ m} \to 0.857\text{ m} \to 1.181\text{ m}$.
+- **Root Cause**:
+  Three asymmetric forward-only software clamps suppressed legitimate reverse motion:
+  1. **Static Anchor Release Clamp (`update.py:340`)**: `if delta_p_body[0] < 0.0: delta_p_body[0] = 0.0`. Upon release from rest, any backward displacement was zeroed out.
+  2. **Turn Reversal Clamp (`forward.py:493`)**: `if is_turning_step: dx_body[0] = max(-0.04, dx_body[0])`. A hand wobble of just $2.8^\circ$ ($0.05\text{ rad}$) triggered `is_turning_step`, clipping backward body displacement to $\ge -4\text{ cm}$.
+  3. **Velocity Reconciliation Reverse Suppression (`update.py:375`)**: `if is_active_turn and v_obs_body[0] < 0.0: v_obs_body[0] = 0.0`.
+  Because negative displacement was clamped to zero while the physical platform moved away from the front wall, velocity reconciliation synthesized artificial positive forward velocity ($v_x = +0.343\text{ m/s}$), which IMU integration projected forward.
+- **Solution Applied**:
+  1. **Bidirectional Static Release**: In `update.py`, replaced the one-sided clamp with a symmetric physical per-scan displacement bound: `delta_p_body[0] = np.clip(delta_p_body[0], -0.20, 0.20)`.
+  2. **Symmetric Longitudinal Step Bound in NHC**: In `forward.py`, removed the asymmetric `-0.04m` clamp and bounded body longitudinal translation symmetrically: `dx_body[0] = np.clip(dx_body[0], -0.25, 0.25)`.
+  3. **Bidirectional Velocity Reconciliation**: In `update.py`, removed reverse velocity zeroing during turns and bounded reverse velocity safely: `if v_obs_body[0] < -0.5: v_obs_body[0] = -0.5`.
+- **Verification**: Verified on 86 unit tests (all passing `OK`), including dedicated tests for bidirectional reverse motion tracking and transition from resting anchor.
+
+---
+
 ## 5. Architectural Comparison with SOTA (FAST-LIVO2 / LIO-SAM)
 
 | Feature | SOTA (FAST-LIO2 / FAST-LIVO2 / LIO-SAM) | Our Implementation | Impact & Required Alignment |

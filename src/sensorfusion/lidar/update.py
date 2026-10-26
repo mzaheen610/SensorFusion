@@ -335,11 +335,10 @@ def lidar_thread(state_lock, buffer_lock, filter, map, imu_measurement_buffer,
                             filter.state.p[:2] = static_anchor_pos.copy()
                             static_anchor_pos = None
                             static_anchor_R = None
-                            # On transition scan, clamp any backward step in body frame
+                            # On transition scan, bound step to plausible physical step limit (<= 20 cm) in body frame
                             delta_p_body = filter.state.R.T @ delta_p
-                            if delta_p_body[0] < 0.0:
-                                delta_p_body[0] = 0.0
-                                delta_p = filter.state.R @ delta_p_body
+                            delta_p_body[0] = np.clip(delta_p_body[0], -0.20, 0.20)
+                            delta_p = filter.state.R @ delta_p_body
                         filter.state.p += delta_p
                         filter.state.p[2] = 0.0
 
@@ -365,15 +364,15 @@ def lidar_thread(state_lock, buffer_lock, filter, map, imu_measurement_buffer,
                                 # Non-Holonomic Constraint (NHC):
                                 # Ground wheeled platform cannot slide laterally.
                                 # Project observed velocity onto body frame and zero out lateral and vertical velocity,
-                                # while preserving forward linear velocity along vehicle heading even during turns.
+                                # while preserving longitudinal velocity (forward and reverse) along vehicle heading.
                                 v_obs_body = filter.state.R.T @ v_obs
                                 v_obs_body[1] = 0.0
                                 v_obs_body[2] = 0.0
 
-                                # Prevent spurious reverse velocity synthesis during turns
-                                is_active_turn = (gyro_max is not None and gyro_max > 0.15)
-                                if is_active_turn and v_obs_body[0] < 0.0:
-                                    v_obs_body[0] = 0.0
+                                # Prevent runaway reverse velocity while preserving legitimate reverse motion
+                                MAX_REVERSE_SPEED = 0.5
+                                if v_obs_body[0] < -MAX_REVERSE_SPEED:
+                                    v_obs_body[0] = -MAX_REVERSE_SPEED
 
                                 v_obs = filter.state.R @ v_obs_body
 

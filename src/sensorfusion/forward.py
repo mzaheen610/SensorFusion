@@ -481,16 +481,15 @@ class ESIKFStateEstimator:
                 # Non-Holonomic Constraint (NHC) for wheeled ground robot:
                 # The vehicle cannot slide sideways (body Y displacement <= 0.03m per scan straight, <= 0.06m during turns)
                 # and cannot fly vertically (body Z displacement = 0.0).
-                # In addition, during active turns, a forward-moving ground platform cannot jump backwards in reverse (body X >= -0.04m).
-                # Transform translation step into the body frame, clamp lateral slip and reverse drag, and transform back.
+                # In addition, bound per-scan longitudinal displacement symmetrically to physical limits (<= 0.25m per scan).
+                # Transform translation step into the body frame, clamp lateral slip and step bounds, and transform back.
                 dx_body = state.R.T @ dx[3:6]
                 is_turning_step = abs(dx[2]) > 0.05 or np.linalg.norm(dx[0:3]) > 0.08
                 max_body_lateral = 0.06 if is_turning_step else 0.03
                 dx_body[1] = np.clip(dx_body[1], -max_body_lateral, max_body_lateral)
                 dx_body[2] = 0.0
-                if is_turning_step:
-                    # During turns, prevent ICP corner false matches from pulling the robot backwards in reverse
-                    dx_body[0] = max(-0.04, dx_body[0])
+                # Symmetric longitudinal displacement bound: allow bidirectional forward & reverse movement (<= 0.25m per scan)
+                dx_body[0] = np.clip(dx_body[0], -0.25, 0.25)
                 dx[3:6] = state.R @ dx_body
 
                 theta_rot = dx[0:3]

@@ -361,9 +361,8 @@ def run_fusion_simulation(
                         static_anchor_pos = None
                         static_anchor_R = None
                         delta_p_body = estimator.state.R.T @ delta_p
-                        if delta_p_body[0] < 0.0:
-                            delta_p_body[0] = 0.0
-                            delta_p = estimator.state.R @ delta_p_body
+                        delta_p_body[0] = np.clip(delta_p_body[0], -0.20, 0.20)
+                        delta_p = estimator.state.R @ delta_p_body
                     estimator.state.p += delta_p
                     estimator.state.p[2] = 0.0
 
@@ -384,9 +383,9 @@ def run_fusion_simulation(
                             v_obs_body = estimator.state.R.T @ v_obs
                             v_obs_body[1] = 0.0
                             v_obs_body[2] = 0.0
-                            is_active_turn = (gyro_max > 0.15)
-                            if is_active_turn and v_obs_body[0] < 0.0:
-                                v_obs_body[0] = 0.0
+                            MAX_REVERSE_SPEED = 0.5
+                            if v_obs_body[0] < -MAX_REVERSE_SPEED:
+                                v_obs_body[0] = -MAX_REVERSE_SPEED
                             v_obs = estimator.state.R @ v_obs_body
                             speed_obs = float(np.linalg.norm(v_obs[:2]))
                             if speed_obs > 0.8:
