@@ -5,7 +5,7 @@ from forward import ESIKFStateEstimator
 from initialize import IMU, CameraSensor
 import numpy as np
 import time
-from lidar.backward import backprop
+from lidar.backward import backprop, copy_state
 from lidar.update import lidar_acquisition_process, lidar_thread
 from map import Map
 from utils.so3_rotation import skew, exp
@@ -80,10 +80,17 @@ def imu_thread(imu, filter_ref):
                 filter_ref.state.v[:] = 0.0
 
             state, cov = filter_ref.predict((gyro, accel), dt)
+            # OLD CODE (kept for reference):
+            # imu_state = (
+            #     now,
+            #     copy.deepcopy(state),
+            #     copy.deepcopy(cov),
+            # )
+            # OPTIMIZATION: Fast typed copy (copy_state + cov.copy()) avoids heavy Python deepcopy overhead at 30Hz
             imu_state = (
                 now,
-                copy.deepcopy(state),
-                copy.deepcopy(cov),
+                copy_state(state),
+                cov.copy(),
             )
             curr_pos = state.p.copy()
         with buffer_lock:

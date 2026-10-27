@@ -83,40 +83,79 @@ def backprop(scan_end_time, prev_scan_time, imu_pose, scan, imu_measurement_buff
     """
     Backward propagate LiDAR points using IMU poses to correct motion distortion
     """
-    compensated_points = []
     observed_period = scan_end_time - prev_scan_time
     if not 0.05 < observed_period < 0.25:
         return np.empty((0, 3), dtype=float)
+    if len(scan) == 0:
+        return np.empty((0, 3), dtype=float)
+
     scan_period = observed_period
     min_point_time = prev_scan_time
 
     trajectory = build_backward_trajectory(scan_end_time, imu_pose, imu_measurement_buffer, min_point_time)
-    for index, point in enumerate(scan):
-        # Find the delta time between scan end and the point sampled time
-        point_time = (index / max(len(scan) - 1, 1)) * scan_period
-        point_abs_time = min_point_time + point_time
 
-        # Find the closest pose in trajectory and interpolate
-        pose_j = interpolated_pose(trajectory, point_abs_time)
-        if pose_j is None:
-            pose_j = imu_pose
+    # OLD CODE (kept for reference):
+    # compensated_points = []
+    # for index, point in enumerate(scan):
+    #     point_time = (index / max(len(scan) - 1, 1)) * scan_period
+    #     point_abs_time = min_point_time + point_time
+    #     pose_j = interpolated_pose(trajectory, point_abs_time)
+    #     if pose_j is None:
+    #         pose_j = imu_pose
+    #     angle_rh = (360.0 - point[1]) % 360.0
+    #     angle = np.deg2rad(angle_rh)
+    #     distance = point[2] / 1000.0  # convert mm to meters
+    #     point_body = np.array([distance * np.cos(angle), distance * np.sin(angle), 0.0])
+    #     R_kj = imu_pose.R.T @ pose_j.R
+    #     p_kj = imu_pose.R.T @ (pose_j.p - imu_pose.p)
+    #     projected_point = R_kj @ point_body + p_kj
+    #     if not np.all(np.isfinite(projected_point)):
+    #         continue
+    #     if np.linalg.norm(projected_point) > 15.0:
+    #         continue
+    #     compensated_points.append(projected_point)
+    # return np.asarray(compensated_points, dtype=float).reshape(-1, 3)
 
-        # Convert RPLidar raw clockwise angle to standard right-handed counter-clockwise angle (ROS REP-103)
-        angle_rh = (360.0 - point[1]) % 360.0
-        angle = np.deg2rad(angle_rh)
-        distance = point[2] / 1000.0  # convert mm to meters
-        point_body = np.array([distance * np.cos(angle), distance * np.sin(angle), 0.0])  # point in body frame
-        R_kj = imu_pose.R.T @ pose_j.R
-        p_kj = imu_pose.R.T @ (pose_j.p - imu_pose.p)
+    # OPTIMIZATION: Vectorized polar-to-Cartesian conversion and searchsorted trajectory lookup in NumPy
+    scan_arr = np.asarray(scan)
+    N = len(scan_arr)
+    angles_rh = (360.0 - scan_arr[:, 1]) % 360.0
+    angles_rad = np.radians(angles_rh)
+    distances = scan_arr[:, 2] / 1000.0
+    pts_body = np.column_stack([
+        distances * np.cos(angles_rad),
+        distances * np.sin(angles_rad),
+        np.zeros(N)
+    ])
 
-        # print("Pose at scan end time: ", imu_pose.p)
-        # print("Pose at point time: ", pose_j.p)
-        # print("R_kj: ", R_kj)
-        # print("p_kj: ", p_kj)
-        projected_point = R_kj @ point_body + p_kj
-        if not np.all(np.isfinite(projected_point)):
-            continue
-        if np.linalg.norm(projected_point) > 15.0:
-            continue
-        compensated_points.append(projected_point)
+    if len(trajectory) <= 1:
+        # Stationary or single pose baseline: points are already in scan_end_time frame
+        valid = np.all(np.isfinite(pts_body), axis=1) & (distances <= 15.0)
+        return pts_body[valid].reshape(-1, 3)
+
+    # Trajectory is sorted newest to oldest: [t0, t1, ...] with t0 >= t1
+    traj_times = np.array([item[0] for item in trajectory])
+    times_asc = traj_times[::-1]
+    poses_asc = [item[1] for item in reversed(trajectory)]
+
+    point_times = min_point_time + np.linspace(0.0, scan_period, N)
+    idx_hi = np.searchsorted(times_asc, point_times, side='right')
+    idx_hi = np.clip(idx_hi, 1, len(poses_asc) - 1)
+
+    compensated_points = []
+    R_imu_T = imu_pose.R.T
+    p_imu = imu_pose.p
+
+    for k in range(N):
+        t_target = point_times[k]
+        i_hi = idx_hi[k]
+        t_hi = times_asc[i_hi]
+        t_lo = times_asc[i_hi - 1]
+        pose_j = poses_asc[i_hi] if (t_hi - t_target) <= (t_target - t_lo) else poses_asc[i_hi - 1]
+        R_kj = R_imu_T @ pose_j.R
+        p_kj = R_imu_T @ (pose_j.p - p_imu)
+        proj = R_kj @ pts_body[k] + p_kj
+        if np.all(np.isfinite(proj)) and np.linalg.norm(proj) <= 15.0:
+            compensated_points.append(proj)
+
     return np.asarray(compensated_points, dtype=float).reshape(-1, 3)

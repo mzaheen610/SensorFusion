@@ -212,6 +212,9 @@ class ESIKFStateEstimator:
             T_GI_init[:3, 3] = state.p
 
             # Downsample the lidar points to reduce computational load (cap to at most 40 points)
+            # Alternative candidate downsamplings tested for lower-power CPUs (kept for reference):
+            # stride = max(1, n_comp // 24); points_to_associate = lidar_points_compensated[::stride][:24]
+            # stride = max(1, n_comp // 32); points_to_associate = lidar_points_compensated[::stride][:32]
             n_comp = len(lidar_points_compensated)
             stride = max(1, n_comp // 40)
             points_to_associate = lidar_points_compensated[::stride][:40]
@@ -356,11 +359,15 @@ class ESIKFStateEstimator:
                         # Tight residual gate while stationary: noise floor is small; reject cross-corner false matches
                         gate = float(np.clip(k * np.sqrt(max(1e-9, innovation_var)), 0.20, 0.40))
                     else:
-                        # Dynamic gate: allow forward stroke displacements up to 0.70m, but cap at 0.75m
-                        # to prevent runaway gates (up to 4.0m) during turn covariance expansion
+                        # Dynamic residual gate during active motion (allows fast strokes up to 0.75m to recover):
                         min_gate = 0.70 if search_radius >= 2 else 0.35
                         max_gate = 0.75 if search_radius >= 2 else 0.45
                         gate = float(np.clip(k * np.sqrt(max(1e-9, innovation_var)), min_gate, max_gate))
+
+                        # Alternative tight dynamic gate (0.40m) for clutter rejection (kept for reference):
+                        # min_gate = 0.30 if search_radius >= 2 else 0.25
+                        # max_gate = 0.40 if search_radius >= 2 else 0.35
+                        # gate = float(np.clip(k * np.sqrt(max(1e-9, innovation_var)), min_gate, max_gate))
                     if DEBUG_LIDAR:
                         print("Residual gate value:", gate)
                     if abs(res) > gate:

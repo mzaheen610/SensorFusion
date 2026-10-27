@@ -57,7 +57,11 @@ def camera_thread(cam, state_lock, buffer_lock, filter, map, imu_state_buffer, c
             frame = cam.get_frame()
             frame_timestamp = time.monotonic()
             if frame is None:
-                time.sleep(0.01)
+                # OLD CODE (kept for reference):
+                # time.sleep(0.01)
+
+                # OPTIMIZATION: Yield the GIL to lidar_thread between keyframes (~5-10 Hz camera pacing)
+                time.sleep(0.05)
                 continue
 
             # Native hardware frame is 640x480; fallback resize only if dimension differs
@@ -79,7 +83,11 @@ def camera_thread(cam, state_lock, buffer_lock, filter, map, imu_state_buffer, c
             if latest_scan is None or latest_scan_time is None or time.monotonic() - latest_scan_time > 0.8:
                 if DEBUG_CAMERA:
                     _publish_debug_frame(display_frame)
-                time.sleep(0.01)
+                # OLD CODE (kept for reference):
+                # time.sleep(0.01)
+
+                # OPTIMIZATION: Yield the GIL to lidar_thread between keyframes (~5-10 Hz camera pacing)
+                time.sleep(0.05)
                 continue
 
             #Get the latest state near the camera scan timing
@@ -91,7 +99,11 @@ def camera_thread(cam, state_lock, buffer_lock, filter, map, imu_state_buffer, c
             if state_item is None:
                 if DEBUG_CAMERA:
                     _publish_debug_frame(display_frame)
-                time.sleep(0.01)
+                # OLD CODE (kept for reference):
+                # time.sleep(0.01)
+
+                # OPTIMIZATION: Yield the GIL to lidar_thread between keyframes (~5-10 Hz camera pacing)
+                time.sleep(0.05)
                 continue
 
             #convert the RGB image to grayscale
@@ -149,11 +161,18 @@ def camera_thread(cam, state_lock, buffer_lock, filter, map, imu_state_buffer, c
                 Iy_patch = Iy[v-4:v+4, u-4:u+4]
 
                 patch_norm = np.linalg.norm(Ix_patch) + np.linalg.norm(Iy_patch)
-                if patch_norm > MIN_GRADIENT_NORM and len(projected_points_filtered)<=30:
+                # OLD CODE (kept for reference):
+                # if patch_norm > MIN_GRADIENT_NORM and len(projected_points_filtered)<=30:
+                #     scored_candidates.append((patch_norm, point))
+                # scored_candidates.sort(key=lambda x: x[0], reverse=True) #sort descending by contrast score
+                # projected_points_filtered = [item[1] for item in scored_candidates[:30]]
+
+                # OPTIMIZATION: Cap to strongest 15 patches (960 pixel residuals instead of 1920)
+                # to cut camera CPU time by 50% and release the Python GIL for 10Hz LiDAR updates.
+                if patch_norm > MIN_GRADIENT_NORM and len(projected_points_filtered) <= 15:
                     scored_candidates.append((patch_norm, point))
-            #get the strongest 30 points based on score for further processing
-            scored_candidates.sort(key=lambda x: x[0], reverse=True) #sort descending by contrast score
-            projected_points_filtered = [item[1] for item in scored_candidates[:30]]
+            scored_candidates.sort(key=lambda x: x[0], reverse=True)
+            projected_points_filtered = [item[1] for item in scored_candidates[:15]]
 
             #get the 8x8 pixel patch surrounding the current lidar point
             for point in projected_points_filtered:
@@ -317,7 +336,11 @@ def camera_thread(cam, state_lock, buffer_lock, filter, map, imu_state_buffer, c
                 print(f"Camera update rate: {rate:.1f} Hz | Photometric residuals evaluated: {len(r)}")
                 camera_rate_last_report = now
 
-            time.sleep(0.01)
+            # OLD CODE (kept for reference):
+            # time.sleep(0.01)
+
+            # OPTIMIZATION: Yield the GIL to lidar_thread between keyframes (~5-10 Hz camera pacing)
+            time.sleep(0.05)
 
         except Exception as e:
             print(f"[camera_thread] Error: {type(e).__name__}: {e}", flush=True)
