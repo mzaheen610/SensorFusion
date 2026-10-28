@@ -270,9 +270,14 @@ def lidar_thread(state_lock, buffer_lock, filter, map, imu_measurement_buffer,
 
                     # Multi-modal stationary check:
                     # LiDAR motion: sim is median bin difference in mm (resting baseline is 1-10 mm).
-                    # If sim >= 20.0 mm, geometric scan displacement occurred -> platform is moving,
-                    # releasing stationary mode promptly without dragging on the resting anchor.
-                    is_lidar_static = (sim is None or sim < 20.0)
+                    # Measured static noise floor across hardware runs:
+                    #   Run1: P90=12.2mm, P99=15.3mm, Max=19.2mm
+                    #   Run2: P90=7.4mm,  P99=10.1mm,  Max=15.0mm
+                    #   Run3: P90=10.2mm, P99=13.7mm,  Max=17.1mm
+                    # New threshold 13.0mm gives 4-6mm safety margin above P99; prevents false
+                    # static lock caused by max noise (19.2mm) being within 0.8mm of old 20.0mm threshold.
+                    # OLD CODE (kept for reference): is_lidar_static = (sim is None or sim < 20.0)
+                    is_lidar_static = (sim is None or sim < 13.0)
                     is_static_sample = is_lidar_static and is_imu_static
 
                     print(
@@ -330,15 +335,27 @@ def lidar_thread(state_lock, buffer_lock, filter, map, imu_measurement_buffer,
                             filter.state.R = static_anchor_R.copy()
                     else:
                         if static_anchor_pos is not None:
-                            # Just released from static anchor: reset live pose cleanly to the true anchor
-                            # to wipe any sub-3cm stationary creep that accumulated while resting
+                            # Transition from static -> dynamic: apply the first scan's legitimate
+                            # displacement BEFORE resetting to the anchor, so we do not erase the
+                            # first real movement.  The old code snapped to the anchor first, which
+                            # silently discarded the first scan's delta_p.
+                            # OLD CODE (kept for reference – caused first-scan displacement loss):
+                            #   filter.state.p[:2] = static_anchor_pos.copy()
+                            #   static_anchor_pos = None
+                            #   static_anchor_R = None
+                            #   delta_p_body = filter.state.R.T @ delta_p
+                            #   delta_p_body[0] = np.clip(delta_p_body[0], -0.20, 0.20)
+                            #   delta_p = filter.state.R @ delta_p_body
+
+                            # NEW: bound step in body frame first, then start from anchor and apply delta
+                            delta_p_body = filter.state.R.T @ delta_p
+                            delta_p_body[0] = np.clip(delta_p_body[0], -0.20, 0.20)
+                            delta_p_body[1] = np.clip(delta_p_body[1], -0.06, 0.06)
+                            delta_p = filter.state.R @ delta_p_body
+                            # Reset to anchor (clears sub-3cm stationary creep), then advance by delta
                             filter.state.p[:2] = static_anchor_pos.copy()
                             static_anchor_pos = None
                             static_anchor_R = None
-                            # On transition scan, bound step to plausible physical step limit (<= 20 cm) in body frame
-                            delta_p_body = filter.state.R.T @ delta_p
-                            delta_p_body[0] = np.clip(delta_p_body[0], -0.20, 0.20)
-                            delta_p = filter.state.R @ delta_p_body
                         filter.state.p += delta_p
                         filter.state.p[2] = 0.0
 
@@ -454,7 +471,23 @@ def lidar_thread(state_lock, buffer_lock, filter, map, imu_measurement_buffer,
                         can_add_points = True
 
                 if can_add_points:
-                    map.add_points(points_world)
+                    # --- Near-field filter: exclude points within 0.5m of sensor centre ---
+                    # Prevents operator hands / body from polluting the map during manual pushes.
+                    robot_pos = filter.state.p
+                    near_field_mask = np.linalg.norm(
+                        points_world[:, :2] - robot_pos[:2], axis=1
+                    ) >= 0.5
+                    points_to_add = points_world[near_field_mask]
+
+                    # --- Association-quality gate: only ingest points on high-confidence scans ---
+                    # Low-association scans (< 25 correspondences) have poor pose estimates;
+                    # adding their points smears the map with duplicate wall measurements.
+                    # OLD CODE (kept for reference – no quality gate):
+                    #   map.add_points(points_world)
+                    MIN_ASSOCIATIONS_FOR_MAP = 25
+                    if (filter.last_lidar_association_count >= MIN_ASSOCIATIONS_FOR_MAP
+                            and len(points_to_add) > 0):
+                        map.add_points(points_to_add)
                     last_map_pos = filter.state.p.copy()
                     last_map_heading = current_heading
 

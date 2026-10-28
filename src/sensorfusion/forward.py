@@ -103,6 +103,10 @@ class ESIKFStateEstimator:
         if getattr(self, 'is_static', False):
             # Windowed mean of horizontal acceleration vector to filter out zero-mean motor vibration oscillations.
             # Filtering the vector before taking the norm avoids rectifying high-frequency vibration into false DC acceleration.
+            # Vector EMA (0.65 / 0.35) rejects 14.3 Hz motor vibration (max EMA norm ~0.177 m/s²)
+            # and sensor noise (~0.118 m/s²), while triggering prompt exit on deliberate pushes (>0.20 m/s²).
+            # Subtle/gentle pushes below 0.20 m/s² are broken out cleanly by the tightened LiDAR
+            # scan similarity threshold (sim >= 13.0 mm) without anchor snap erasure.
             if not hasattr(self, '_static_accel_ema_vec') or not isinstance(self._static_accel_ema_vec, np.ndarray):
                 self._static_accel_ema_vec = np.zeros(2)
             self._static_accel_ema_vec = 0.65 * self._static_accel_ema_vec + 0.35 * accel[:2]
@@ -110,6 +114,8 @@ class ESIKFStateEstimator:
             self._static_accel_ema = accel_ema_norm
 
             # Exit static on sustained turn (|w| > 0.15) or sustained directional horizontal acceleration (|a_xy| > 0.20)
+            # OLD CODE (kept for reference):
+            # if ang_norm > 0.15 or accel_ema_norm > 0.12:
             if ang_norm > 0.15 or accel_ema_norm > 0.20:
                 self.is_static = False
                 self._static_accel_ema_vec = np.zeros(2)

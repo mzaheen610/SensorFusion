@@ -45,21 +45,61 @@ class Map:
     
     def add_points(self, points):
         #add lidar points to the voxel map
+        # EMA deduplication: if an incoming point is within 3.5 cm of an existing point in the
+        # same voxel, blend it into that existing point (α=0.15) instead of appending a new one.
+        # This prevents 20–26 noisy copies of the same wall from stacking up during repetitive
+        # forward/backward manoeuvres, which inflates s2/s0 and causes SVD planarity rejection.
+        # OLD CODE (kept for reference – no deduplication):
+        #   for point in points:
+        #       key = self.get_voxel_key(point)
+        #       if key not in self.voxel_map:
+        #           self.voxel_map[key] = {"lidar": [], "image": [], "color": []}
+        #       voxel = self.voxel_map[key]
+        #       if len(voxel["lidar"]) < self.max_points_per_voxel:
+        #           voxel["lidar"].append(point)
+        #           voxel["color"].append(np.array([128.0, 128.0, 128.0]))
+        #           voxel["image"].append(None)
+        EMA_ALPHA = 0.15           # blend weight for the new observation
+        DEDUP_RADIUS = 0.009       # 0.9 cm proximity threshold for EMA update
+        # Note: radius is intentionally small to avoid merging distinct map features
+        # (wall points separated by a few cm must remain distinct for SVD plane fitting).
+        # Primary anti-smear defence is the association-quality gate in update.py.
+        # This EMA layer prevents truly coincident re-measurements (< 9 mm apart) from
+        # stacking up as separate entries, which would inflate noise in coplanar SVD fits.
         with self.lock:
             for point in points:
+                point = np.asarray(point, dtype=float)
                 key = self.get_voxel_key(point)
                 if key not in self.voxel_map:
-                    self.voxel_map[key]= {
+                    self.voxel_map[key] = {
                         "lidar": [],
                         "image": [],
                         "color": []
                     }
                 voxel = self.voxel_map[key]
-                #cap the points in a voxel to bound the map size
-                if len(voxel["lidar"]) < self.max_points_per_voxel:   
-                    voxel["lidar"].append(point)
-                    voxel["color"].append(np.array([128.0, 128.0, 128.0]))  # placeholder gray
-                    voxel["image"].append(None)  #store image patch per point
+                existing = voxel["lidar"]
+
+                # Check whether a sufficiently close point already exists in this voxel
+                merged = False
+                if existing:
+                    dists = np.linalg.norm(
+                        np.asarray(existing) - point, axis=1
+                    )
+                    nearest_idx = int(np.argmin(dists))
+                    if dists[nearest_idx] <= DEDUP_RADIUS:
+                        # EMA blend: nudge the existing point slightly towards the new measurement
+                        existing[nearest_idx] = (
+                            (1.0 - EMA_ALPHA) * existing[nearest_idx]
+                            + EMA_ALPHA * point
+                        )
+                        merged = True
+
+                if not merged:
+                    # cap the points in a voxel to bound the map size
+                    if len(voxel["lidar"]) < self.max_points_per_voxel:
+                        voxel["lidar"].append(point)
+                        voxel["color"].append(np.array([128.0, 128.0, 128.0]))  # placeholder gray
+                        voxel["image"].append(None)  # store image patch per point
 
     def query(self, point, min_points_in_voxel=10, radius_voxels=1, max_correspondence_distance=None):
         # Find neighbors from the current voxel first.

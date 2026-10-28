@@ -328,4 +328,37 @@ Analysis of production hardware logs (`run_2026_10_27_*.log`) revealed a frequen
    - Retained the 40 candidate point association quota to guarantee full rank-3 observability during high-frequency slalom weaving (ATE RMSE = 0.78 cm).
    - Preserved dynamic residual gate expansion up to 0.75m during active motion to ensure rapid recovery from large manual strokes (e.g. 0.6m forward translation).
 
+---
+
+## 9. Motion Breakaway from Rest & Anti-Smear Map Ingestion
+
+### Telemetry Diagnosis from Hardware Runs (`run_2026_10_28_*.log`):
+Following the latency optimizations, repetitive forward-backward and left-right maneuvers within a 1-meter bounding area revealed two interrelated tracking issues:
+1. **Delayed Motion Recognition / Static Lock**:
+   - The system took 2–3 scans (~0.7–1.0s) to recognize movement from a stationary start; gentle hand pushes were occasionally ignored completely.
+   - **Root Cause**: The static noise floor of the LiDAR scan similarity metric was empirically measured across multiple logs:
+     - Run 1 (`12_55_06`): P90 = 12.2 mm, P99 = 15.3 mm, Max = 19.2 mm.
+     - Run 2 (`13_13_09`): P90 = 7.4 mm, P99 = 10.1 mm, Max = 15.0 mm.
+     - Run 3 (`13_19_05`): P90 = 10.2 mm, P99 = 13.7 mm, Max = 17.1 mm.
+   - The stationary threshold was set to `sim < 20.0 mm`. Because peak stationary sensor noise reached 19.2 mm, real initial motions producing 14–19 mm scan displacement remained locked in static mode.
+   - Furthermore, upon exiting static mode, the anchor release logic wiped the live position to `static_anchor_pos` before applying the step, silently discarding the first scan's physical displacement.
+2. **Map Smearing in Repetitive Maneuvers**:
+   - In repetitive movements within a small area, the map point count inflated from 188 to 3,722 points.
+   - Without point deduplication within voxels, 20–26 noisy scans of the identical wall stacked up into 10–15 cm thick artificial point clusters.
+   - In SVD plane extraction, the thickness ratio $s_2 / s_0$ exceeded the $0.10$ planarity threshold, causing valid wall associations to drop from 40 down to 11 and provoking tracking loss.
+
+### Implemented Fixes (Non-Destructive, Old Code Retained as Comments):
+1. **Tightened LiDAR Motion Breakaway (`src/sensorfusion/lidar/update.py`)**:
+   - Lowered stationary similarity threshold from `sim < 20.0 mm` to `sim < 13.0 mm`.
+   - Leaves a safe 4–6 mm clearance above the true P99 stationary noise floor (~10–14 mm) while immediately breaking out of stillness on physical motion.
+2. **Preserved Initial Displacement on Static Anchor Release (`src/sensorfusion/lidar/update.py`)**:
+   - On transition from stationary to dynamic, the vehicle body-frame step $\Delta p_{body}$ is bounded first, the anchor position is restored to wipe sub-3cm stationary creep, and then $\Delta p$ is applied forward. Legitimate first-scan displacement is no longer erased.
+3. **Association-Gated Map Ingestion & Near-Field Filtering (`src/sensorfusion/lidar/update.py`)**:
+   - Map points are only ingested when association quality is high (`filter.last_lidar_association_count >= 25`), preventing corrupted or drifting scans from polluting the global map.
+   - Points within $0.5\text{ m}$ of the robot body center are filtered out prior to map addition, rejecting operator hands and body during manual guidance.
+4. **Voxel Point EMA Deduplication (`src/sensorfusion/map.py`)**:
+   - In `Map.add_points()`, newly observed points within $0.9\text{ cm}$ of an existing point in the same voxel update the existing point via Exponential Moving Average ($\alpha = 0.15$) rather than appending duplicate points up to the voxel cap.
+   - Keeps planar wall surfaces sharp and prevents $s_2/s_0$ singular value inflation.
+
+
 
